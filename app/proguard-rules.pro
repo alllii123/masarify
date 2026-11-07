@@ -1,0 +1,4 @@
+-keep class com.masarify.app.data.** { *; }
+-keepclassmembers class com.masarify.app.data.** { *; }
+-dontwarn org.bouncycastle.**
+-dontwarn org.conscrypt.**

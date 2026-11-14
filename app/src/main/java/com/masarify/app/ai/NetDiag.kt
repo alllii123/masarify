@@ -104,14 +104,31 @@ object NetDiag {
             }
         }
 
-        // 6) توليد تجريبي
-        out += step("توليد تجريبي بموديل $model") {
+        // 6) توليد تجريبي عادي
+        out += step("توليد تجريبي (طلب عادي)") {
             val start = System.currentTimeMillis()
             CloudAiClient.ask(apiKey, model, "مختصر", "snapshot: currency=QAR", emptyList()).fold(
                 onSuccess = { reply ->
-                    Line(true, "رد خلال ${System.currentTimeMillis() - start} مللي: «${reply.take(50)}»")
+                    Line(true, "رد خلال ${System.currentTimeMillis() - start} مللي: «${reply.take(40)}»")
                 },
                 onFailure = { error -> Line(false, error.message ?: "فشل غير معروف") }
+            )
+        }
+
+        // 7) توليد تجريبي بالبثّ — المسار البديل الذي يستخدمه التطبيق
+        out += step("توليد تجريبي (بثّ)") {
+            val start = System.currentTimeMillis()
+            var firstByteAt = 0L
+            CloudAiClient.askStreaming(apiKey, model, "مختصر", "snapshot: currency=QAR", emptyList()) { partial ->
+                if (firstByteAt == 0L && partial.isNotEmpty()) firstByteAt = System.currentTimeMillis() - start
+            }.fold(
+                onSuccess = { reply ->
+                    Line(
+                        true,
+                        "البثّ يعمل ✅ (أول جزء بعد ${if (firstByteAt > 0) firstByteAt else System.currentTimeMillis() - start} مللي، الكل ${System.currentTimeMillis() - start} مللي)"
+                    )
+                },
+                onFailure = { error -> Line(false, "البثّ فشل: ${error.message}") }
             )
         }
 

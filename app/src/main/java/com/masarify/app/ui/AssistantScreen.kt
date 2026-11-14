@@ -195,7 +195,7 @@ fun AssistantScreen(
                     }
                 }
             } else {
-                items(messages, key = { it.id }) { message ->
+                items(messages.filter { it.text.isNotBlank() || it.error != null }, key = { it.id }) { message ->
                     ChatBubble(message)
                 }
                 if (state.aiThinking) {

@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.ConnectionPool
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
@@ -31,19 +32,29 @@ object CloudAiClient {
     data class Message(val role: String, val text: String)
 
     private const val HOST = "https://generativelanguage.googleapis.com/v1beta"
-    private const val CONNECT_TIMEOUT = 15L
-    private const val READ_TIMEOUT = 45L
-    private const val CALL_TIMEOUT = 60L
+    private const val CONNECT_TIMEOUT = 12L
+    private const val READ_TIMEOUT = 30L
+    /** إجمالي الطلب: 35 ثانية كحد أقصى، فلا ينتظر المستخدم أكثر. */
+    private const val CALL_TIMEOUT = 35L
 
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
+    /**
+     * HTTP/1.1 مقصود، لا HTTP/2:
+     * على شبكات الجوال في قطر لوحظ أن اتصال HTTP/2 المعاد استخدامه يُعلّق عند POST
+     * بينما GET ينجح. HTTP/1.1 يتصرف بشكل متوقع مع هذه الشبكات،
+     * وفرق السرعة لا يذكر في طلبات قصيرة مثل هذه.
+     */
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .protocols(listOf(Protocol.HTTP_1_1))
             .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
             .writeTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
             .callTimeout(CALL_TIMEOUT, TimeUnit.SECONDS)
-            .connectionPool(ConnectionPool(4, 5, TimeUnit.MINUTES))
+            // لا نعيد استخدام الاتصالات: كل طلب يفتح اتصالًا نظيفًا،
+            // فلا نرث اتصالًا ميتًا من طلب سابق.
+            .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
             .retryOnConnectionFailure(true)
             .followRedirects(true)
             .build()
@@ -171,7 +182,7 @@ object CloudAiClient {
                             }
                         }
                     } catch (e: SocketTimeoutException) {
-                        Outcome.Fail("انتهت مدة الانتظار (${CALL_TIMEOUT}ث). جرّب WiFi بدل بيانات الجوال أو العكس.")
+                        Outcome.Fail("انتهت مدة الانتظار (${CALL_TIMEOUT}ث). جرّب WiFi بدل بيانات الجوال، أو بدّل الوضع إلى «محلي».")
                     } catch (e: UnknownHostException) {
                         Outcome.Retry
                     } catch (e: java.net.ConnectException) {
@@ -199,6 +210,120 @@ object CloudAiClient {
             }
             error(lastError)
         }
+    }
+
+    /**
+     * نسخة تدعم البثّ (streamGenerateContent): ترسل النص تدريجيًا.
+     * مفيدة لو الطلب العادي يعلّق على شبكة معينة، لأن أول بايت يصل بسرعة
+     * ويُبطل انتظار الخادم الطويل.
+     */
+    suspend fun askStreaming(
+        apiKey: String,
+        model: String,
+        style: String,
+        context: String,
+        history: List<Message>,
+        onChunk: (String) -> Unit
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = buildRequestBody(style, context, history, "stream")
+            val candidates = (listOf(model.ifBlank { "" }) + candidateModels).filter { it.isNotBlank() }.distinct()
+            var lastError = "تعذّر الاتصال."
+
+            for (candidate in candidates) {
+                val request = Request.Builder()
+                    .url("$HOST/models/$candidate:streamGenerateContent?alt=sse")
+                    .header("x-goog-api-key", apiKey)
+                    .header("Content-Type", "application/json")
+                    .post(body.toRequestBody(JSON))
+                    .build()
+
+                try {
+                    client.newCall(request).execute().use { response ->
+                        if (response.code == 404) {
+                            lastError = "الموديل «$candidate» غير متاح."
+                            return@use
+                        }
+                        if (!response.isSuccessful) {
+                            error(friendlyHttpError(response.code, response.body?.string().orEmpty()))
+                        }
+
+                        val source = response.body?.source() ?: error("لا يوجد رد")
+                        val builder = StringBuilder()
+                        while (!source.exhausted()) {
+                            val line = source.readUtf8Line() ?: break
+                            if (!line.startsWith("data:")) continue
+                            val json = line.removePrefix("data:").trim()
+                            if (json.isEmpty() || json == "[DONE]") continue
+                            val delta = runCatching {
+                                JSONObject(json).getJSONArray("candidates").getJSONObject(0)
+                                    .getJSONObject("content").getJSONArray("parts").let { parts ->
+                                        buildString {
+                                            for (i in 0 until parts.length()) {
+                                                append(parts.getJSONObject(i).optString("text"))
+                                            }
+                                        }
+                                    }
+                            }.getOrDefault("")
+                            if (delta.isNotEmpty()) {
+                                builder.append(delta)
+                                onChunk(builder.toString())
+                            }
+                        }
+                        if (builder.isBlank()) error("رد فارغ من البثّ.")
+                        return@runCatching builder.toString()
+                    }
+                } catch (e: IOException) {
+                    lastError = "انقطاع الشبكة أثناء البثّ: ${e.message ?: "غير معروف"}"
+                }
+            }
+            error(lastError)
+        }
+    }
+
+    /** يبني جسم الطلب مرة واحدة ليستخدمه النمط العادي والبثّ. */
+    private fun buildRequestBody(
+        style: String,
+        context: String,
+        history: List<Message>,
+        mode: String
+    ): String {
+        val system = buildString {
+            append("أنت مساعد مالي شخصي داخل تطبيق «مصاريفي» في قطر. ")
+            append("استخدم الريال القطري (ر.ق) في كل الأرقام. ")
+            append("أجب بالعربية العامية الخليجية المبسطة، باختصار وبدون مقدمات طويلة. ")
+            append("اعتمد فقط على الأرقام الموجودة في السياق ولا تخترع أرقامًا. ")
+            append("لو طُلب منك نصيحة استثمار أو قرض، وضّح أن هذا ليس استشارة مالية رسمية. ")
+            append("الأسلوب المطلوب: $style. ")
+            append("سياق بيانات المستخدم: $context")
+        }
+        val contents = JSONArray().apply {
+            history.takeLast(10).forEach { message ->
+                put(
+                    JSONObject().apply {
+                        put("role", if (message.role == "user") "user" else "model")
+                        put("parts", JSONArray().put(JSONObject().put("text", message.text)))
+                    }
+                )
+            }
+            if (history.isEmpty()) {
+                put(
+                    JSONObject().apply {
+                        put("role", "user")
+                        put("parts", JSONArray().put(JSONObject().put("text", "أعطني ملخصًا سريعًا لوضعي المالي.")))
+                    }
+                )
+            }
+        }
+        return JSONObject().apply {
+            put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+            put("contents", contents)
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.4)
+                put("maxOutputTokens", 800)
+                put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+            })
+        }.toString()
     }
 
     private sealed interface Outcome {

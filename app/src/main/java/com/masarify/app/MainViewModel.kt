@@ -313,34 +313,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val startedAt = System.currentTimeMillis()
-            CloudAiClient.ask(
+
+            // ضع رسالة مؤقتة تتحوّل لنص متدفّق أثناء وصول البثّ
+            val streamingId = "stream-${System.currentTimeMillis()}"
+            chat.update {
+                it + ChatMessage(id = streamingId, role = "model", text = "", source = "cloud")
+            }
+
+            // أولًا البثّ: يظهر النص أثناء وصوله فورًا — يلغي الإحساس بالتعليق
+            val streamed = CloudAiClient.askStreaming(
                 apiKey = settings.aiApiKey,
                 model = settings.aiModel,
                 style = style,
                 context = context,
                 history = history + CloudAiClient.Message("user", text)
-            ).fold(
+            ) { partial ->
+                chat.update { list ->
+                    list.map { message ->
+                        if (message.id == streamingId) message.copy(text = partial) else message
+                    }
+                }
+            }
+
+            val result = streamed.recoverCatching {
+                // البثّ فشل؟ نجرّب الطلب العادي قبل الاستسلام
+                CloudAiClient.ask(
+                    apiKey = settings.aiApiKey,
+                    model = settings.aiModel,
+                    style = style,
+                    context = context,
+                    history = history + CloudAiClient.Message("user", text)
+                ).getOrThrow()
+            }
+
+            result.fold(
                 onSuccess = { answer ->
-                    chat.update {
-                        it + ChatMessage(
-                            role = "model",
-                            text = answer,
-                            source = "cloud",
-                            elapsedMs = System.currentTimeMillis() - startedAt,
-                            model = settings.aiModel
-                        )
+                    chat.update { list ->
+                        list.map { message ->
+                            if (message.id == streamingId) {
+                                message.copy(
+                                    text = answer,
+                                    elapsedMs = System.currentTimeMillis() - startedAt,
+                                    model = settings.aiModel
+                                )
+                            } else message
+                        }
                     }
                 },
                 onFailure = { error ->
                     val message = error.message ?: "تعذّر الوصول للمساعد السحابي."
-                    // الجواب المحلي صحيح ومكتمل — نعرض سبب تعذّر السحابة كملاحظة صغيرة فقط
-                    chat.update {
-                        it + ChatMessage(
-                            role = "model",
-                            text = localReply,
-                            source = "local",
-                            error = "تعذّر الوصول للسحابة: $message"
-                        )
+                    // الجواب المحلي صحيح ومكتمل — نستبدل الرسالة المؤقتة به
+                    chat.update { list ->
+                        list.map { existing ->
+                            if (existing.id == streamingId) {
+                                ChatMessage(
+                                    id = streamingId,
+                                    role = "model",
+                                    text = localReply,
+                                    source = "local",
+                                    error = "تعذّر الوصول للسحابة: $message"
+                                )
+                            } else existing
+                        }
                     }
                 }
             )

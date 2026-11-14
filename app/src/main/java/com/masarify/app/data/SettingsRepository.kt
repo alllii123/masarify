@@ -24,7 +24,7 @@ enum class AiMode {
 }
 
 data class UserSettings(
-    val themeColor: ThemeColor = ThemeColor.GREEN,
+    val themeColor: ThemeColor = ThemeColor.BLUE,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val salaryAmount: Long = 0,
     val salaryDay: Int = 27,
@@ -70,7 +70,7 @@ class SettingsRepository(private val context: Context) {
 
     val settings: Flow<UserSettings> = context.dataStore.data.map { p ->
         UserSettings(
-            themeColor = runCatching { ThemeColor.valueOf(p[Keys.color] ?: "GREEN") }.getOrDefault(ThemeColor.GREEN),
+            themeColor = runCatching { ThemeColor.valueOf(p[Keys.color] ?: "BLUE") }.getOrDefault(ThemeColor.BLUE),
             themeMode = runCatching { ThemeMode.valueOf(p[Keys.mode] ?: "SYSTEM") }.getOrDefault(ThemeMode.SYSTEM),
             salaryAmount = p[Keys.salary] ?: 0,
             salaryDay = p[Keys.salaryDay] ?: 27,

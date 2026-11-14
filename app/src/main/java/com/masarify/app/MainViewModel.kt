@@ -1,6 +1,9 @@
 package com.masarify.app
 
 import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import androidx.glance.appwidget.updateAll
 import androidx.lifecycle.AndroidViewModel
@@ -77,6 +80,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     private data class ChatState(val messages: List<ChatMessage>, val thinking: Boolean)
+
+    /** هل يوجد اتصال فعلي بالإنترنت الآن؟ (بدون إجراء طلب شبكة) */
+    private fun hasInternet(): Boolean = runCatching {
+        val manager = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = manager.activeNetwork ?: return false
+        val caps = manager.getNetworkCapabilities(network) ?: return false
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }.getOrDefault(false)
 
     private val extra = combine(
         keyStatus, backupStatus, backupBusy, restoreCandidate, diagLines, diagRunning,
@@ -288,6 +300,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 AiStyle.ANALYST -> "تحليلي مع أرقام"
             }
 
+            // لو ما فيه إنترنت فعلي، لا نجرّب السحابة أصلًا: نجاوب محليًا فورًا
+            if (!hasInternet()) {
+                chat.update {
+                    it + ChatMessage(
+                        role = "model",
+                        text = localReply + "\n\n(جاوبتك محليًا لأن الاتصال بالإنترنت غير متاح الآن.)",
+                        source = "local"
+                    )
+                }
+                return@launch
+            }
+
             val startedAt = System.currentTimeMillis()
             CloudAiClient.ask(
                 apiKey = settings.aiApiKey,
@@ -309,13 +333,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 },
                 onFailure = { error ->
                     val message = error.message ?: "تعذّر الوصول للمساعد السحابي."
-                    val fallback = if (settings.aiMode == AiMode.CLOUD) {
-                        "$message\n\nهذا الجواب من التحليل المحلي:\n\n$localReply"
-                    } else {
-                        "$message\n\n— جاوبتك محليًا:\n\n$localReply"
-                    }
+                    // الجواب المحلي صحيح ومكتمل — نعرض سبب تعذّر السحابة كملاحظة صغيرة فقط
                     chat.update {
-                        it + ChatMessage(role = "model", text = fallback, source = "local", error = message)
+                        it + ChatMessage(
+                            role = "model",
+                            text = localReply,
+                            source = "local",
+                            error = "تعذّر الوصول للسحابة: $message"
+                        )
                     }
                 }
             )

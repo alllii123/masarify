@@ -21,7 +21,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 5
-        versionName = "0.5.0"
+        versionName = "0.4.1"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -85,6 +85,7 @@ dependencies {
     ksp("androidx.room:room-compiler:$roomVersion")
     implementation("androidx.glance:glance-appwidget:1.1.1")
     implementation("androidx.glance:glance-material3:1.1.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")
     // نسخة حقيقية من org.json حتى تعمل اختبارات النسخ الاحتياطي على JVM
     testImplementation("org.json:json:20240303")

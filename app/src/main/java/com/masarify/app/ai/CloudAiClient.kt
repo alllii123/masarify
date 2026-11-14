@@ -1,29 +1,53 @@
 package com.masarify.app.ai
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import okhttp3.ConnectionPool
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.net.HttpURLConnection
-import java.net.URL
+import java.io.IOException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import java.util.concurrent.TimeUnit
 
 /**
- * عميل Gemini اختياري.
+ * عميل Gemini اختياري مبني على OkHttp.
+ *
+ * لماذا OkHttp بدل HttpURLConnection؟
+ * على شبكات الجوال يحدث كثيرًا أن الاتصال الأول يبقى معلّقًا (شوهد 111 ثانية)
+ * ثم يُرفض طلب ثانٍ بـ UnknownHostException. OkHttp يعيد استخدام الاتصال،
+ * ويتعامل مع IPv4/IPv6 وTLS بشكل أفضل، ويعطي مهلات واضحة لكل مرحلة.
  *
  * - المفتاح يبقى على الجهاز في DataStore ولا يُسجّل في أي log.
- * - يجرّب تلقائيًا أكثر من اسم موديل، لأن Google تُعيد تسمية/إنهاء الموديلات.
- * - يحوّل أخطاء الشبكة إلى رسائل عربية مفهومة بدل Timeout غامض.
+ * - يجرّب أكثر من اسم موديل لأن Google تُعيد تسمية/إنهاء الموديلات.
  */
 object CloudAiClient {
 
     data class Message(val role: String, val text: String)
 
     private const val HOST = "https://generativelanguage.googleapis.com/v1beta"
+    private const val CONNECT_TIMEOUT = 15L
+    private const val READ_TIMEOUT = 45L
+    private const val CALL_TIMEOUT = 60L
 
-    /** مهلة أطول من السابق (كانت 30 ثانية إجمالًا) لأن الشبكات المتنقلة قد تبطئ. */
-    private const val CONNECT_TIMEOUT = 25_000
-    private const val READ_TIMEOUT = 90_000
+    private val JSON = "application/json; charset=utf-8".toMediaType()
+
+    private val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
+            .writeTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
+            .callTimeout(CALL_TIMEOUT, TimeUnit.SECONDS)
+            .connectionPool(ConnectionPool(4, 5, TimeUnit.MINUTES))
+            .retryOnConnectionFailure(true)
+            .followRedirects(true)
+            .build()
+    }
 
     /** الأسرع أولًا: موديلات lite ترد عادة في أقل من ثانية. */
     val candidateModels = listOf(
@@ -34,7 +58,6 @@ object CloudAiClient {
         "gemini-3.5-flash"
     )
 
-    /** خيارات تُعرض للمستخدم في الإعدادات. */
     val suggestedModels = listOf(
         "gemini-2.5-flash-lite" to "الأسرع (موصى به)",
         "gemini-flash-latest" to "الأحدث",
@@ -42,35 +65,36 @@ object CloudAiClient {
         "gemini-2.5-pro" to "الأدق والأبطأ"
     )
 
-    /** يقرأ الموديلات المتاحة فعليًا على مفتاح المستخدم. */
+    // ────────────────────────────────────────────────────────────────────────
     suspend fun listModels(apiKey: String): Result<List<String>> = withContext(Dispatchers.IO) {
         runCatching {
-            val connection = (URL("$HOST/models?pageSize=200").openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = CONNECT_TIMEOUT
-                readTimeout = READ_TIMEOUT
-                setRequestProperty("x-goog-api-key", apiKey)
-            }
-            val code = connection.responseCode
-            val payload = (if (code in 200..299) connection.inputStream else connection.errorStream)
-                ?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
-            if (code !in 200..299) error(friendlyHttpError(code, payload))
+            val request = Request.Builder()
+                .url("$HOST/models?pageSize=200")
+                .header("x-goog-api-key", apiKey)
+                .get()
+                .build()
 
-            val models = JSONObject(payload).optJSONArray("models") ?: JSONArray()
-            buildList {
-                for (i in 0 until models.length()) {
-                    val model = models.getJSONObject(i)
-                    val methods = model.optJSONArray("supportedGenerationMethods")
-                    val canGenerate = methods == null || (0 until methods.length()).any {
-                        methods.optString(it).contains("generateContent")
+            client.newCall(request).execute().use { response ->
+                val payload = response.body?.string().orEmpty()
+                if (!response.isSuccessful) error(friendlyHttpError(response.code, payload))
+
+                val models = JSONObject(payload).optJSONArray("models") ?: JSONArray()
+                buildList {
+                    for (i in 0 until models.length()) {
+                        val model = models.getJSONObject(i)
+                        val methods = model.optJSONArray("supportedGenerationMethods")
+                        val canGenerate = methods == null || (0 until methods.length()).any {
+                            methods.optString(it).contains("generateContent")
+                        }
+                        val name = model.optString("name").removePrefix("models/")
+                        if (canGenerate && name.isNotBlank()) add(name)
                     }
-                    val name = model.optString("name").removePrefix("models/")
-                    if (canGenerate && name.isNotBlank()) add(name)
                 }
             }
         }
     }
 
+    // ────────────────────────────────────────────────────────────────────────
     suspend fun ask(
         apiKey: String,
         model: String,
@@ -108,14 +132,13 @@ object CloudAiClient {
                 }
             }
 
-            fun buildBody(disableThinking: Boolean): String = JSONObject().apply {
+            fun buildBody(withThinkingConfig: Boolean): String = JSONObject().apply {
                 put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
                 put("contents", contents)
                 put("generationConfig", JSONObject().apply {
                     put("temperature", 0.4)
                     put("maxOutputTokens", 800)
-                    // تقليل التفكير الداخلي يسرّع الرد كثيرًا على موديلات 2.5+
-                    if (disableThinking) put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
+                    if (withThinkingConfig) put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
                 })
             }.toString()
 
@@ -123,67 +146,92 @@ object CloudAiClient {
             var lastError = "تعذّر الاتصال بالمساعد."
 
             for (candidate in modelsToTry) {
-              var retriedWithoutThinking = false
-              while (true) {
-                val connection = (URL("$HOST/models/$candidate:generateContent").openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = CONNECT_TIMEOUT
-                    readTimeout = READ_TIMEOUT
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                    setRequestProperty("x-goog-api-key", apiKey)
-                }
+                var withThinking = true
+                var attempt = 0
+                while (attempt < 2) {
+                    attempt++
+                    val request = Request.Builder()
+                        .url("$HOST/models/$candidate:generateContent")
+                        .header("x-goog-api-key", apiKey)
+                        .header("Content-Type", "application/json")
+                        .post(buildBody(withThinking).toRequestBody(JSON))
+                        .build()
 
-                try {
-                    connection.outputStream.use { it.write(buildBody(!retriedWithoutThinking).toByteArray(Charsets.UTF_8)) }
-                    val code = connection.responseCode
-                    val payload = (if (code in 200..299) connection.inputStream else connection.errorStream)
-                        ?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
-
-                    if (code == 404) {
-                        lastError = "الموديل «$candidate» غير متاح لمفتاحك."
-                        continue // جرّب الموديل التالي
-                    }
-                    if (code == 400 && payload.contains("thinking", ignoreCase = true) && !retriedWithoutThinking) {
-                        // بعض الموديلات لا تدعم thinkingBudget: نعيد المحاولة بدونها
-                        retriedWithoutThinking = true
-                        connection.disconnect()
-                        continue
-                    }
-                    if (code !in 200..299) error(friendlyHttpError(code, payload))
-
-                    val root = JSONObject(payload)
-                    if (root.has("promptFeedback")) {
-                        val reason = root.getJSONObject("promptFeedback").optString("blockReason")
-                        if (reason.isNotBlank()) error("تم حجب الطلب من Google ($reason). أعد صياغة السؤال بشكل مالي واضح.")
-                    }
-
-                    val text = runCatching {
-                        root.getJSONArray("candidates").getJSONObject(0)
-                            .getJSONObject("content").getJSONArray("parts")
-                            .let { parts ->
-                                buildString {
-                                    for (i in 0 until parts.length()) append(parts.getJSONObject(i).optString("text"))
+                    val outcome = try {
+                        client.newCall(request).execute().use { response ->
+                            val payload = response.body?.string().orEmpty()
+                            when {
+                                response.code == 404 -> Outcome.Skip
+                                response.code == 400 && payload.contains("thinking", true) && withThinking -> {
+                                    withThinking = false
+                                    Outcome.Retry
                                 }
+                                !response.isSuccessful -> Outcome.Fail(friendlyHttpError(response.code, payload))
+                                else -> Outcome.Ok(extractText(payload))
                             }
-                    }.getOrNull()?.trim().orEmpty()
+                        }
+                    } catch (e: SocketTimeoutException) {
+                        Outcome.Fail("انتهت مدة الانتظار (${CALL_TIMEOUT}ث). جرّب WiFi بدل بيانات الجوال أو العكس.")
+                    } catch (e: UnknownHostException) {
+                        Outcome.Retry
+                    } catch (e: java.net.ConnectException) {
+                        Outcome.Retry
+                    } catch (e: IOException) {
+                        Outcome.Retry
+                    }
 
-                    if (text.isBlank()) error("وصل رد فارغ من المساعد. جرّب صيغة سؤال ثانية.")
-                    return@runCatching text
-                } catch (e: java.net.SocketTimeoutException) {
-                    error("انتهت مدة الانتظار بدون رد. تحقق من الإنترنت أو جرّب موديل أسرع مثل gemini-2.5-flash.")
-                } catch (e: java.net.UnknownHostException) {
-                    error("لا يوجد اتصال بالإنترنت. الوضع المحلي يشتغل بدون إنترنت.")
-                } catch (e: java.io.IOException) {
-                    error("انقطاع في الشبكة: ${e.message ?: "تحقق من الاتصال"}")
-                } finally {
-                    connection.disconnect()
+                    when (outcome) {
+                        is Outcome.Ok -> return@runCatching outcome.text
+                        is Outcome.Fail -> error(outcome.message)
+                        Outcome.Skip -> {
+                            lastError = "الموديل «$candidate» غير متاح لمفتاحك."
+                            break
+                        }
+                        Outcome.Retry -> {
+                            // إعادة محاولة واحدة بعد مهلة قصيرة — تعالج انقطاعات شبكة الجوال
+                            if (attempt < 2) delay(700) else {
+                                lastError = "تعذّر الاتصال بالشبكة. جرّب تشغيل/إيقاف WiFi ثم أعد المحاولة."
+                                break
+                            }
+                        }
+                    }
                 }
-                break
-              }
             }
-            error("$lastError جرّب تحديث الموديلات من الإعدادات.")
+            error(lastError)
         }
+    }
+
+    private sealed interface Outcome {
+        data class Ok(val text: String) : Outcome
+        data class Fail(val message: String) : Outcome
+        data object Skip : Outcome
+        data object Retry : Outcome
+    }
+
+    private fun extractText(payload: String): String {
+        val root = JSONObject(payload)
+        if (root.has("promptFeedback")) {
+            val reason = root.getJSONObject("promptFeedback").optString("blockReason")
+            if (reason.isNotBlank()) error("تم حجب الطلب من Google ($reason). أعد صياغة السؤال بشكل مالي واضح.")
+        }
+        val text = runCatching {
+            root.getJSONArray("candidates").getJSONObject(0)
+                .getJSONObject("content").getJSONArray("parts")
+                .let { parts ->
+                    buildString {
+                        for (i in 0 until parts.length()) append(parts.getJSONObject(i).optString("text"))
+                    }
+                }
+        }.getOrNull()?.trim().orEmpty()
+
+        if (text.isBlank()) {
+            // موديلات التفكير قد ترجع محتوى فارغًا لو استهلكت الرموز في التفكير
+            val finish = runCatching {
+                root.getJSONArray("candidates").getJSONObject(0).optString("finishReason")
+            }.getOrDefault("")
+            error("وصل رد فارغ${if (finish.isNotBlank()) " ($finish)" else ""}. جرّب موديل lite أو أعد صياغة السؤال.")
+        }
+        return text
     }
 
     suspend fun checkKey(apiKey: String, model: String): Result<String> =
@@ -195,9 +243,9 @@ object CloudAiClient {
         }.getOrDefault("")
         return when (code) {
             400 -> "الطلب غير صالح${if (detail.isNotBlank()) ": $detail" else "."}"
-            401, 403 -> "المفتاح غير مقبول. تأكد أنك فعّلت Generative Language API وأن المفتاح صحيح."
-            404 -> "الموديل غير موجود. جرّب «تحديث الموديلات» في الإعدادات."
-            429 -> "تجاوزت حد الطلبات المجاني للمفتاح. انتظر دقيقة أو استخدم الوضع المحلي."
+            401, 403 -> "المفتاح غير مقبول. تأكد أن Generative Language API مفعّلة على مشروعك."
+            404 -> "الموديل غير موجود لمفتاحك. جرّب «تحديث الموديلات»."
+            429 -> "تجاوزت حد الطلبات للمفتاح. انتظر دقيقة أو استخدم الوضع المحلي."
             500, 503 -> "خدمة Google مشغولة حاليًا. جرّب بعد قليل."
             else -> "فشل الاتصال (رمز $code)${if (detail.isNotBlank()) ": $detail" else "."}"
         }

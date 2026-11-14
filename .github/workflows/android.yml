@@ -32,7 +32,6 @@ jobs:
           ./gradlew --no-daemon --max-workers=2 testDebugUnitTest
 
       - name: Restore signing keystore
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -59,7 +58,7 @@ jobs:
           retention-days: 30
 
       - name: Publish signed release APK to Releases
-        if: ${{ github.ref == 'refs/heads/main' && secrets.KEYSTORE_BASE64 != '' }}
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

@@ -8,3 +8,8 @@ local.properties
 *.apk
 *.aab
 .DS_Store
+
+# أسرار التوقيع — لا تُرفع
+keystore.properties
+*.jks
+*.keystore

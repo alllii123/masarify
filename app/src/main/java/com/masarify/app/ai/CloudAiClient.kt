@@ -21,6 +21,10 @@ object CloudAiClient {
 
     private const val HOST = "https://generativelanguage.googleapis.com/v1beta"
 
+    /** مهلة أطول من السابق (كانت 30 ثانية إجمالًا) لأن الشبكات المتنقلة قد تبطئ. */
+    private const val CONNECT_TIMEOUT = 25_000
+    private const val READ_TIMEOUT = 90_000
+
     /** الأحدث أولًا. لو رجع 404 ننتقل للتالي. */
     val candidateModels = listOf(
         "gemini-flash-latest",
@@ -35,8 +39,8 @@ object CloudAiClient {
         runCatching {
             val connection = (URL("$HOST/models?pageSize=200").openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 15_000
-                readTimeout = 25_000
+                connectTimeout = CONNECT_TIMEOUT
+                readTimeout = READ_TIMEOUT
                 setRequestProperty("x-goog-api-key", apiKey)
             }
             val code = connection.responseCode
@@ -111,8 +115,8 @@ object CloudAiClient {
             for (candidate in modelsToTry) {
                 val connection = (URL("$HOST/models/$candidate:generateContent").openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
-                    connectTimeout = 20_000
-                    readTimeout = 60_000
+                    connectTimeout = CONNECT_TIMEOUT
+                    readTimeout = READ_TIMEOUT
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
                     setRequestProperty("x-goog-api-key", apiKey)

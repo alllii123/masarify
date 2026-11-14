@@ -8,6 +8,8 @@ import androidx.lifecycle.viewModelScope
 import com.masarify.app.ai.ChatMessage
 import com.masarify.app.ai.CloudAiClient
 import com.masarify.app.ai.MoneySnapshot
+import com.masarify.app.ai.NetDiag
+import com.masarify.app.update.UpdateChecker
 import com.masarify.app.ai.cloudContext
 import com.masarify.app.ai.localAnswer
 import com.masarify.app.data.AccountEntity
@@ -36,7 +38,13 @@ data class UiState(
     val chatMessages: List<ChatMessage> = emptyList(),
     val aiThinking: Boolean = false,
     val keyStatus: String = "",
+    val diagLines: List<NetDiag.Line> = emptyList(),
+    val diagRunning: Boolean = false,
     val backupStatus: String = "",
+    val updateStatus: String = "",
+    val updateAvailable: UpdateChecker.Release? = null,
+    val updateProgress: Int = -1,
+    val currentVersion: String = BuildConfig.VERSION_NAME,
     val backupBusy: Boolean = false,
     val restoreCandidate: BackupCodec.Parsed? = null
 )
@@ -49,6 +57,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val chat = MutableStateFlow<List<ChatMessage>>(emptyList())
     private val thinking = MutableStateFlow(false)
     private val keyStatus = MutableStateFlow("")
+    private val diagLines = MutableStateFlow<List<NetDiag.Line>>(emptyList())
+    private val diagRunning = MutableStateFlow(false)
+    private val updateStatus = MutableStateFlow("")
+    private val updateAvailable = MutableStateFlow<UpdateChecker.Release?>(null)
+    private val updateProgress = MutableStateFlow(-1)
     private val backupStatus = MutableStateFlow("")
     private val backupBusy = MutableStateFlow(false)
     private val restoreCandidate = MutableStateFlow<BackupCodec.Parsed?>(null)
@@ -65,8 +78,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private data class ChatState(val messages: List<ChatMessage>, val thinking: Boolean)
 
-    private val extra = combine(keyStatus, backupStatus, backupBusy, restoreCandidate) { k, b, busy, candidate ->
-        ExtraState(k, b, busy, candidate)
+    private val extra = combine(
+        keyStatus, backupStatus, backupBusy, restoreCandidate, diagLines, diagRunning,
+        updateStatus, updateAvailable, updateProgress
+    ) { values ->
+        ExtraState(
+            keyStatus = values[0] as String,
+            backupStatus = values[1] as String,
+            backupBusy = values[2] as Boolean,
+            restoreCandidate = values[3] as BackupCodec.Parsed?,
+            diagLines = values[4] as List<NetDiag.Line>,
+            diagRunning = values[5] as Boolean,
+            updateStatus = values[6] as String,
+            updateAvailable = values[7] as UpdateChecker.Release?,
+            updateProgress = values[8] as Int
+        )
     }
 
     private val coreFlow = combine(
@@ -87,7 +113,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             chatMessages = chatState.messages,
             aiThinking = chatState.thinking,
             keyStatus = extras.keyStatus,
+            diagLines = extras.diagLines,
+            diagRunning = extras.diagRunning,
             backupStatus = extras.backupStatus,
+            updateStatus = extras.updateStatus,
+            updateAvailable = extras.updateAvailable,
+            updateProgress = extras.updateProgress,
             backupBusy = extras.backupBusy,
             restoreCandidate = extras.restoreCandidate
         )
@@ -97,7 +128,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val keyStatus: String,
         val backupStatus: String,
         val backupBusy: Boolean,
-        val restoreCandidate: BackupCodec.Parsed?
+        val restoreCandidate: BackupCodec.Parsed?,
+        val diagLines: List<NetDiag.Line>,
+        val diagRunning: Boolean,
+        val updateStatus: String,
+        val updateAvailable: UpdateChecker.Release?,
+        val updateProgress: Int
     )
 
     init {
@@ -170,6 +206,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             onSuccess = { reply -> keyStatus.value = "المفتاح يعمل ✅ — ${reply.take(40)}" },
             onFailure = { keyStatus.value = it.message ?: "تعذّر التحقق من المفتاح" }
         )
+    }
+
+    /** تشخيص شامل للشبكة والمفتاح، بقائمة قابلة للنسخ. */
+    fun runDiagnostics() = viewModelScope.launch {
+        if (diagRunning.value) return@launch
+        diagRunning.value = true
+        diagLines.value = listOf(NetDiag.Line(true, "جاري الفحص…"))
+        diagLines.value = NetDiag.run(
+            uiState.value.settings.aiApiKey,
+            uiState.value.settings.aiModel
+        )
+        diagRunning.value = false
+    }
+
+    fun diagnosticsText(): String = diagLines.value.joinToString("\n") {
+        (if (it.ok) "✅ " else "❌ ") + it.text
     }
 
     fun clearChat() {
@@ -375,6 +427,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearBackupStatus() { backupStatus.value = "" }
+
+    // ── التحديث الداخلي ──────────────────────────────────────────────────────
+    fun checkForUpdate() = viewModelScope.launch {
+        updateStatus.value = "أفحص التحديثات…"
+        UpdateChecker.latest().fold(
+            onSuccess = { release ->
+                when {
+                    release == null -> updateStatus.value = "لا يوجد ملف تحديث منشور بعد."
+                    UpdateChecker.isNewer(release.versionName, BuildConfig.VERSION_NAME) -> {
+                        updateAvailable.value = release
+                        updateStatus.value = "يتوفر إصدار ${release.versionName} (الحالي ${BuildConfig.VERSION_NAME})."
+                    }
+                    else -> {
+                        updateAvailable.value = null
+                        updateStatus.value = "أنت على آخر إصدار (${BuildConfig.VERSION_NAME})."
+                    }
+                }
+            },
+            onFailure = { updateStatus.value = "تعذّر فحص التحديثات: ${it.message}" }
+        )
+    }
+
+    fun downloadUpdate() = viewModelScope.launch {
+        val release = updateAvailable.value ?: return@launch
+        updateProgress.value = 0
+        updateStatus.value = "جاري التنزيل…"
+        UpdateChecker.download(getApplication(), release) { progress ->
+            updateProgress.value = progress
+        }.fold(
+            onSuccess = { file ->
+                updateStatus.value = "تم التنزيل. تفتح شاشة التثبيت الآن — اضغط «تحديث»."
+                updateProgress.value = -1
+                runCatching { UpdateChecker.install(getApplication(), file) }
+                    .onFailure { updateStatus.value = "تعذّر فتح شاشة التثبيت: ${it.message}" }
+            },
+            onFailure = {
+                updateStatus.value = "فشل التنزيل: ${it.message}"
+                updateProgress.value = -1
+            }
+        )
+    }
 
     fun updateWidget() {
         viewModelScope.launch { MasarifyWidget().updateAll(getApplication()) }

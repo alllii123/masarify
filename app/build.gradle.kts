@@ -20,8 +20,8 @@ android {
         applicationId = "com.masarify.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -56,7 +56,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     lint {
         // فحص Lint الكامل يُشغَّل في CI بذاكرة كافية؛ تعطيله هنا يمنع فشل بناء الإصدار على الأجهزة المحدودة.
         checkReleaseBuilds = false

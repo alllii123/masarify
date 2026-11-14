@@ -1,5 +1,6 @@
 package com.masarify.app.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,9 +12,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -22,6 +27,8 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Savings
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -36,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,6 +52,7 @@ import com.masarify.app.UiState
 import com.masarify.app.data.UserSettings
 import com.masarify.app.util.formatMoney
 import com.masarify.app.util.moneyInput
+import com.masarify.app.util.formatMonth
 import com.masarify.app.util.monthStart
 import com.masarify.app.util.parseMoney
 import java.time.LocalDate
@@ -168,39 +177,178 @@ fun ReportsScreen(state: UiState, contentPadding: PaddingValues, onSettings: () 
     val monthTransactions = state.transactions.filter { it.timestamp >= start }
     val income = monthTransactions.filter { it.type == "INCOME" }.sumOf { it.amount }
     val expense = monthTransactions.filter { it.type == "EXPENSE" }.sumOf { it.amount }
-    val categories = monthTransactions.filter { it.type == "EXPENSE" }.groupBy { it.category }.mapValues { entry -> entry.value.sumOf { it.amount } }.toList().sortedByDescending { it.second }
+    val categories = monthTransactions
+        .filter { it.type == "EXPENSE" }
+        .groupBy { it.category.ifBlank { "أخرى" } }
+        .mapValues { entry -> entry.value.sumOf { it.amount } }
+        .toList()
+        .sortedByDescending { it.second }
     val max = categories.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
+    val net = income - expense
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = Space.page, end = Space.page, top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding() + 26.dp),
         verticalArrangement = Arrangement.spacedBy(Space.gap)
     ) {
-        item { PageHeader("التقارير", LocalDate.now().format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale("ar", "SA"))), onSettings) }
+        item {
+            PageHeader("التقارير", formatMonth(), onSettings)
+        }
+
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MetricCard("الدخل", formatMoney(income), Icons.Rounded.ArrowDownward, MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                 MetricCard("المصروف", formatMoney(expense), Icons.Rounded.ArrowUpward, MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                MetricCard("الصافي", formatMoney(income - expense), Icons.Rounded.Savings, MaterialTheme.colorScheme.tertiary, modifier = Modifier.weight(1f))
             }
         }
+
+        item {
+            MetricCard(
+                title = "الصافي هذا الشهر",
+                value = formatMoney(net),
+                icon = if (net >= 0) Icons.Rounded.Savings else Icons.Rounded.ErrorOutline,
+                tint = if (net >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                caption = if (income > 0) "من دخل ${formatMoney(income)}" else "لا يوجد دخل مسجل",
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
         item {
             SectionCard {
-                Text("المصروف حسب التصنيف", fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(12.dp))
-                if (categories.isEmpty()) EmptyState("لا توجد مصاريف هذا الشهر", "ستظهر التصنيفات هنا تلقائيًا")
-                categories.forEach { (category, amount) ->
-                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(category, fontSize = 13.sp)
-                            Text(formatMoney(amount), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Box(modifier = Modifier.fillMaxWidth().height(7.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))) {
-                            Box(modifier = Modifier.fillMaxWidth((amount.toFloat() / max).coerceIn(.02f, 1f)).height(7.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp)))
+                Text("توزيع المصروف", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+                Text("نسبة كل تصنيف من مصروف الشهر", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(16.dp))
+                if (categories.isEmpty()) {
+                    EmptyState("لا توجد مصاريف هذا الشهر", "أضف عمليات وسيظهر التوزيع هنا", Icons.Rounded.BarChart)
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CategoryDonut(
+                            slices = categories.take(6).map { it.second },
+                            modifier = Modifier.size(150.dp)
+                        )
+                        Spacer(Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            categories.take(6).forEachIndexed { index, (category, amount) ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        Modifier
+                                            .size(9.dp)
+                                            .background(chartColor(index), CircleShape)
+                                    )
+                                    Spacer(Modifier.width(7.dp))
+                                    Text(
+                                        category,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        "${if (expense > 0) (amount * 100 / expense) else 0}%",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
+        }
+
+        if (categories.isNotEmpty()) {
+            item { SectionTitle("التفصيل حسب التصنيف") }
+            items(categories.size) { index ->
+                val (category, amount) = categories[index]
+                SectionCard(padding = 16) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .background(chartColor(index).copy(alpha = 0.14f), RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(categoryIcon(category), contentDescription = null, tint = chartColor(index), modifier = Modifier.size(19.dp))
+                        }
+                        Spacer(Modifier.width(11.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(category, style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "${if (expense > 0) (amount * 100 / expense) else 0}% من مصروف الشهر",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(formatMoney(amount), style = MaterialTheme.typography.titleSmall)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(7.dp)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest, RoundedCornerShape(6.dp))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth((amount.toFloat() / max).coerceIn(0.02f, 1f))
+                                .height(7.dp)
+                                .background(chartColor(index), RoundedCornerShape(6.dp))
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            SectionCard {
+                Text("ملاحظة على الأرقام", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "التقارير تحسب من العمليات المسجلة داخل التطبيق فقط، وتشمل الشهر الحالي ميلاديًا. لو اعتمدت على قراءة رسائل البنك، تأكد من تأكيد المسودات حتى تدخل في الحساب.",
+                    style = MaterialTheme.typography.labelSmall,
+                    lineHeight = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/** ألوان ثابتة للرسم البياني، تعمل مع الثيم الأخضر والأزرق والوضع الليلي. */
+private fun chartColor(index: Int): androidx.compose.ui.graphics.Color = listOf(
+    androidx.compose.ui.graphics.Color(0xFF2E8B6F),
+    androidx.compose.ui.graphics.Color(0xFF4A7FB5),
+    androidx.compose.ui.graphics.Color(0xFFC8963E),
+    androidx.compose.ui.graphics.Color(0xFF8E6BAF),
+    androidx.compose.ui.graphics.Color(0xFFB5654A),
+    androidx.compose.ui.graphics.Color(0xFF4E9A9A)
+)[index % 6]
+
+/** حلقة توزيع مرسومة يدويًا بدون مكتبات خارجية. */
+@Composable
+private fun CategoryDonut(slices: List<Long>, modifier: Modifier = Modifier) {
+    val total = slices.sum().coerceAtLeast(1)
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val stroke = size.minDimension * 0.17f
+        val inset = stroke / 2
+        val arcSize = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
+        var startAngle = -90f
+        slices.forEachIndexed { index, value ->
+            val sweep = (value.toFloat() / total.toFloat()) * 360f
+            drawArc(
+                color = chartColor(index),
+                startAngle = startAngle,
+                sweepAngle = (sweep - 2.2f).coerceAtLeast(0.8f),
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+                size = arcSize,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = stroke,
+                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                )
+            )
+            startAngle += sweep
         }
     }
 }

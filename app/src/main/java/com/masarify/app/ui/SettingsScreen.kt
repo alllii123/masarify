@@ -30,6 +30,11 @@ import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.NetworkCheck
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.NewReleases
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Visibility
@@ -55,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -108,6 +114,88 @@ fun SettingsScreen(state: UiState, contentPadding: PaddingValues, onBack: () -> 
                     Text("الإعدادات", style = MaterialTheme.typography.headlineSmall)
                     Text("المظهر والذكاء الاصطناعي والحسابات والخصوصية", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            }
+        }
+
+        // ── التحديث ────────────────────────────────────────────────────────
+        item {
+            SectionCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier.size(34.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(11.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.SystemUpdate, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.size(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("تحديث التطبيق", style = MaterialTheme.typography.titleMedium)
+                        Text("الإصدار الحالي ${state.currentVersion}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = { viewModel.checkForUpdate() }) { Text("فحص") }
+                }
+
+                state.updateAvailable?.let { release ->
+                    Spacer(Modifier.height(10.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.medium)
+                            .padding(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.NewReleases, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.size(7.dp))
+                            Text(
+                                "إصدار جديد ${release.versionName}",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                        if (release.notes.isNotBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                release.notes.take(300),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                                maxLines = 6
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Button(onClick = { viewModel.downloadUpdate() }, enabled = state.updateProgress < 0, modifier = Modifier.fillMaxWidth()) {
+                            if (state.updateProgress in 0..99) {
+                                Text("جاري التنزيل… ${state.updateProgress}%")
+                            } else {
+                                Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.size(6.dp))
+                                Text("نزّل وثبّت التحديث")
+                            }
+                        }
+                        if (state.updateProgress in 0..100) {
+                            Spacer(Modifier.height(8.dp))
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { state.updateProgress / 100f },
+                                modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(5.dp))
+                            )
+                        }
+                    }
+                }
+
+                if (state.updateStatus.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        state.updateStatus,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "التحديث ينزّل داخل التطبيق ثم تفتح شاشة أندرويد ← اضغط «تحديث». بياناتك تبقى لأن التوقيع نفسه.",
+                    style = MaterialTheme.typography.labelSmall,
+                    lineHeight = 17.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 
@@ -298,6 +386,64 @@ fun SettingsScreen(state: UiState, contentPadding: PaddingValues, onBack: () -> 
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+
+        // ── تشخيص المساعد ──────────────────────────────────────────────────
+        item {
+            SectionCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier.size(34.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(11.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.NetworkCheck, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.size(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("تشخيص المساعد", style = MaterialTheme.typography.titleMedium)
+                        Text("اعرف وين المشكلة بالضبط بدل التخمين", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { viewModel.runDiagnostics() }, enabled = !state.diagRunning, modifier = Modifier.weight(1f)) {
+                        if (state.diagRunning) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("افحص الآن")
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val text = viewModel.diagnosticsText()
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("masarify-diag", text))
+                            android.widget.Toast.makeText(context, "تم النسخ — أرسله لي في المحادثة", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                        enabled = state.diagLines.isNotEmpty(),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("نسخ النتيجة") }
+                }
+                if (state.diagLines.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.shapes.medium)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        state.diagLines.forEach { line ->
+                            Text(
+                                (if (line.ok) "✅ " else "❌ ") + line.text,
+                                style = MaterialTheme.typography.labelSmall,
+                                lineHeight = 17.sp,
+                                color = if (line.ok) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
                 }
             }
         }

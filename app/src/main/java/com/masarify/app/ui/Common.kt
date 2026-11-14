@@ -294,7 +294,12 @@ fun MetricCard(
 }
 
 @Composable
-fun StatPill(label: String, value: String, modifier: Modifier = Modifier) {
+fun StatPill(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    hint: String = ""
+) {
     Column(
         modifier = modifier
             .background(Color.White.copy(alpha = 0.14f), RoundedCornerShape(14.dp))
@@ -303,6 +308,10 @@ fun StatPill(label: String, value: String, modifier: Modifier = Modifier) {
         Text(label, color = Color.White.copy(alpha = 0.78f), style = MaterialTheme.typography.labelSmall)
         Spacer(Modifier.height(3.dp))
         Text(value, color = Color.White, style = MaterialTheme.typography.titleSmall)
+        if (hint.isNotBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(hint, color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
+        }
     }
 }
 

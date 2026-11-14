@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -128,28 +129,6 @@ fun HomeScreen(
                 expense = snapshot.cycleExpense,
                 income = snapshot.cycleIncome
             )
-        }
-
-        item {
-            // صف الأرقام الثلاثة التي يسأل عنها المستخدم دائمًا
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SumChip(
-                    label = "مجموعك",
-                    value = formatMoney(snapshot.totalBalance),
-                    highlighted = true,
-                    modifier = Modifier.weight(1f)
-                )
-                SumChip(
-                    label = "المتاح بأمان",
-                    value = formatMoney(snapshot.safe),
-                    modifier = Modifier.weight(1f)
-                )
-                SumChip(
-                    label = "يوميًا",
-                    value = formatMoney(daily),
-                    modifier = Modifier.weight(1f)
-                )
-            }
         }
 
         item {
@@ -277,26 +256,25 @@ private fun SafeCard(
             .background(
                 Brush.linearGradient(
                     listOf(
+                        scheme.primary.copy(alpha = 0.98f),
                         scheme.primary,
-                        scheme.primary.copy(alpha = 0.92f),
-                        scheme.primary.copy(alpha = 0.88f)
+                        scheme.primary.copy(alpha = 0.86f).compositeOver(Color.Black.copy(alpha = 0.18f)),
+                        scheme.primary.copy(alpha = 0.78f).compositeOver(Color.Black.copy(alpha = 0.28f))
                     )
                 )
             )
             .padding(22.dp)
     ) {
         Column {
+            // ── العنوان + عدّاد الأيام ─────────────────────────────────────
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "المتاح بأمان",
-                    color = scheme.onPrimary.copy(alpha = 0.9f),
+                    "مجموعك",
+                    color = scheme.onPrimary.copy(alpha = 0.92f),
                     style = MaterialTheme.typography.labelLarge
                 )
                 Spacer(Modifier.weight(1f))
-                Surface(
-                    shape = CircleShape,
-                    color = Color.White.copy(alpha = 0.16f)
-                ) {
+                Surface(shape = CircleShape, color = Color.White.copy(alpha = 0.16f)) {
                     Text(
                         if (days == 0) "الراتب اليوم" else "باقي $days يوم",
                         color = Color.White,
@@ -305,40 +283,68 @@ private fun SafeCard(
                     )
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
+
+            // ── الرقم الأساسي: المجموع ─────────────────────────────────────
             Text(
-                formatMoney(safe),
+                formatMoney(total),
                 color = Color.White,
                 style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
-                "بعد حجز الالتزامات وهدف الادخار",
-                color = Color.White.copy(alpha = 0.72f),
+                "في كل حساباتك",
+                color = Color.White.copy(alpha = 0.68f),
                 style = MaterialTheme.typography.labelSmall
             )
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+
+            Spacer(Modifier.height(14.dp))
+
+            // ── الرقم الثاني: المتاح بأمان (أصغر) ─────────────────────────
+            Row(verticalAlignment = Alignment.Bottom) {
+                Column {
+                    Text(
+                        "المتاح بأمان",
+                        color = Color.White.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Text(
+                        "بعد حجز الالتزامات وهدف الادخار",
+                        color = Color.White.copy(alpha = 0.55f),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                Spacer(Modifier.weight(1f))
                 Text(
-                    "مجموعك في كل الحسابات",
-                    color = Color.White.copy(alpha = 0.72f),
-                    style = MaterialTheme.typography.labelSmall
-                )
-                Spacer(Modifier.size(7.dp))
-                Text(
-                    formatMoney(total),
+                    formatMoney(safe),
                     color = Color.White,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
                 )
             }
+
             Spacer(Modifier.height(16.dp))
+
+            // ── شريطا المعلومة ─────────────────────────────────────────────
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                StatPill("تقدر تصرف يوميًا", formatMoney(daily), Modifier.weight(1f))
-                StatPill("مصروف الدورة", formatMoney(expense), Modifier.weight(1f))
+                StatPill(
+                    label = "تقدر تصرف يوميًا",
+                    hint = "المتاح ÷ $days يوم",
+                    value = formatMoney(daily),
+                    modifier = Modifier.weight(1f)
+                )
+                StatPill(
+                    label = "مصروف الدورة",
+                    hint = if (income > 0) "من ${formatMoney(income)}" else "دون دخل مسجل",
+                    value = formatMoney(expense),
+                    modifier = Modifier.weight(1f)
+                )
             }
+
             if (income > 0) {
                 Spacer(Modifier.height(16.dp))
                 LinearProgressIndicator(
@@ -355,41 +361,6 @@ private fun SafeCard(
                 )
             }
         }
-    }
-}
-
-/** شريحة رقم صغيرة موحّدة الشكل لصف الأرقام الرئيسية. */
-@Composable
-private fun SumChip(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    highlighted: Boolean = false
-) {
-    val scheme = MaterialTheme.colorScheme
-    Column(
-        modifier = modifier
-            .clip(MaterialTheme.shapes.large)
-            .background(
-                if (highlighted) scheme.primaryContainer else scheme.surfaceContainerHigh
-            )
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (highlighted) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
-            maxLines = 1
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            value,
-            style = MaterialTheme.typography.titleSmall,
-            color = if (highlighted) scheme.onPrimaryContainer else scheme.onSurface,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 

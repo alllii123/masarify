@@ -59,6 +59,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
+            SKIP_INSTALL=NO \
             clean archive 2>&1 | tee "$RUNNER_TEMP/archive.log" || {
               echo "::error::فشل البناء — راجع السجل أدناه"
               tail -80 "$RUNNER_TEMP/archive.log"
@@ -69,6 +70,9 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           APP_PATH="Mahfazati.xcarchive/Products/Applications/Mahfazati.app"
+          # Bundle id مطلوب داخل Info.plist وإلا يرفضه ios ‏(Archive Missing Bundle Identifier)
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.mahfazati.app" "$APP_PATH/Info.plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.mahfazati.app" "$APP_PATH/Info.plist"
           if [ ! -d "$APP_PATH" ]; then
             echo "::error::لم يُعثر على Mahfazati.app داخل الأرشيف"
             ls -R Mahfazati.xcarchive/Products | head -40

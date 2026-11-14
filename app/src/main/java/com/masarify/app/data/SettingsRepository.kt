@@ -16,6 +16,13 @@ enum class ThemeColor { GREEN, BLUE }
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 enum class AiStyle { SIMPLE, FRIENDLY, ANALYST }
 
+/** من يجاوب على المستخدم؟ */
+enum class AiMode {
+    LOCAL,      // محلي فقط
+    AUTO,       // سحابي إن توفر، وإلا محلي
+    CLOUD       // سحابي فقط
+}
+
 data class UserSettings(
     val themeColor: ThemeColor = ThemeColor.GREEN,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
@@ -30,8 +37,11 @@ data class UserSettings(
     /** المساعد السحابي اختياري، ولا يعمل إلا إذا أضاف المستخدم مفتاحه الخاص. */
     val aiCloudEnabled: Boolean = false,
     val aiApiKey: String = "",
-    val aiModel: String = "gemini-2.0-flash",
+    val aiModel: String = "gemini-flash-latest",
     val aiStyle: AiStyle = AiStyle.SIMPLE,
+    val aiMode: AiMode = AiMode.AUTO,
+    /** قائمة الموديلات التي رجعتها Google لمفتاح المستخدم. */
+    val aiAvailableModels: List<String> = emptyList(),
     /** لا يُرسل أي رقم مالي للسحابة إلا بعد موافقة صريحة داخل المحادثة. */
     val aiShareAmounts: Boolean = false
 ) {
@@ -54,6 +64,8 @@ class SettingsRepository(private val context: Context) {
         val aiModel = stringPreferencesKey("ai_model")
         val aiStyle = stringPreferencesKey("ai_style")
         val aiShare = booleanPreferencesKey("ai_share_amounts")
+        val aiMode = stringPreferencesKey("ai_mode")
+        val aiModels = stringPreferencesKey("ai_models")
     }
 
     val settings: Flow<UserSettings> = context.dataStore.data.map { p ->
@@ -69,7 +81,9 @@ class SettingsRepository(private val context: Context) {
             aiLocalEnabled = p[Keys.aiLocal] ?: true,
             aiCloudEnabled = p[Keys.aiCloud] ?: false,
             aiApiKey = p[Keys.aiKey] ?: "",
-            aiModel = p[Keys.aiModel] ?: "gemini-2.0-flash",
+            aiModel = p[Keys.aiModel] ?: "gemini-flash-latest",
+            aiMode = runCatching { AiMode.valueOf(p[Keys.aiMode] ?: "AUTO") }.getOrDefault(AiMode.AUTO),
+            aiAvailableModels = p[Keys.aiModels]?.split("|")?.filter { it.isNotBlank() } ?: emptyList(),
             aiStyle = runCatching { AiStyle.valueOf(p[Keys.aiStyle] ?: "SIMPLE") }.getOrDefault(AiStyle.SIMPLE),
             aiShareAmounts = p[Keys.aiShare] ?: false
         )
@@ -83,8 +97,10 @@ class SettingsRepository(private val context: Context) {
     suspend fun setAiLocalEnabled(value: Boolean) = context.dataStore.edit { it[Keys.aiLocal] = value }
     suspend fun setAiCloudEnabled(value: Boolean) = context.dataStore.edit { it[Keys.aiCloud] = value }
     suspend fun setAiApiKey(value: String) = context.dataStore.edit { it[Keys.aiKey] = value.trim() }
-    suspend fun setAiModel(value: String) = context.dataStore.edit { it[Keys.aiModel] = value.trim().ifBlank { "gemini-2.0-flash" } }
+    suspend fun setAiModel(value: String) = context.dataStore.edit { it[Keys.aiModel] = value.trim().ifBlank { "gemini-flash-latest" } }
     suspend fun setAiStyle(value: AiStyle) = context.dataStore.edit { it[Keys.aiStyle] = value.name }
+    suspend fun setAiMode(value: AiMode) = context.dataStore.edit { it[Keys.aiMode] = value.name }
+    suspend fun setAiAvailableModels(values: List<String>) = context.dataStore.edit { it[Keys.aiModels] = values.joinToString("|") }
     suspend fun setAiShareAmounts(value: Boolean) = context.dataStore.edit { it[Keys.aiShare] = value }
 
     suspend fun updatePlan(salary: Long, day: Int, savings: Long, commitments: Long) {

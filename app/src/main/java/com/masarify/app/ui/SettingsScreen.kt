@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.masarify.app.backup.BackupManager
+import com.masarify.app.data.AiMode
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -25,12 +27,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.material.icons.rounded.Restore
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -77,6 +86,9 @@ fun SettingsScreen(state: UiState, contentPadding: PaddingValues, onBack: () -> 
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         viewModel.setSmsEnabled(result[Manifest.permission.RECEIVE_SMS] == true)
+    }
+    val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        result.data?.data?.let { uri -> viewModel.prepareRestore(uri) }
     }
 
     LazyColumn(
@@ -189,8 +201,47 @@ fun SettingsScreen(state: UiState, contentPadding: PaddingValues, onBack: () -> 
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text("الموديل") },
                             singleLine = true,
-                            shape = RoundedCornerShape(14.dp)
+                            shape = RoundedCornerShape(14.dp),
+                            trailingIcon = {
+                                IconButton(onClick = { viewModel.refreshModels() }) {
+                                    Icon(Icons.Rounded.Refresh, contentDescription = "تحديث الموديلات")
+                                }
+                            }
                         )
+                        if (state.settings.aiAvailableModels.isNotEmpty()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text("الموديلات المتاحة على مفتاحك:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(4.dp))
+                            state.settings.aiAvailableModels.take(6).chunked(2).forEach { row ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    row.forEach { name ->
+                                        FilterChip(
+                                            selected = state.settings.aiModel == name,
+                                            onClick = { viewModel.setAiModel(name) },
+                                            label = { Text(name.removePrefix("gemini-"), style = MaterialTheme.typography.labelSmall) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Text("من يجاوب؟", style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            AiMode.entries.forEach { mode ->
+                                FilterChip(
+                                    selected = state.settings.aiMode == mode,
+                                    onClick = { viewModel.setAiMode(mode) },
+                                    label = {
+                                        Text(when (mode) {
+                                            AiMode.LOCAL -> "محلي"
+                                            AiMode.AUTO -> "تلقائي"
+                                            AiMode.CLOUD -> "سحابي"
+                                        })
+                                    }
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(10.dp))
                         Text("أسلوب الرد", style = MaterialTheme.typography.titleSmall)
                         Spacer(Modifier.height(6.dp))
@@ -218,12 +269,13 @@ fun SettingsScreen(state: UiState, contentPadding: PaddingValues, onBack: () -> 
                         Spacer(Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = { viewModel.setAiApiKey(apiKey) }) { Text("حفظ المفتاح") }
-                            TextButton(onClick = { viewModel.testAiKey() }) { Text("اختبار الاتصال") }
+                            TextButton(onClick = { viewModel.testAiKey() }) { Text("اختبار") }
+                            TextButton(onClick = { viewModel.refreshModels() }) { Text("تحديث الموديلات") }
                             TextButton(onClick = { viewModel.clearChat() }) { Text("تفريغ المحادثة") }
                         }
                         if (state.keyStatus.isNotBlank()) {
                             Text(
-                                state.keyStatus,
+                                state.keyStatus.replace("\n", " ").take(220),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (state.keyStatus.contains("✅")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                             )
@@ -363,29 +415,104 @@ fun SettingsScreen(state: UiState, contentPadding: PaddingValues, onBack: () -> 
         item {
             SectionCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.CloudOff, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(8.dp))
-                    Text("النسخ الاحتياطي", style = MaterialTheme.typography.titleMedium)
+                    Box(
+                        modifier = Modifier.size(34.dp).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(11.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.CloudUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.size(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("النسخ الاحتياطي والاستعادة", style = MaterialTheme.typography.titleMedium)
+                        Text("ملف واحد ينتقل بين الجوالات — ويصلح لـ Google Drive", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { viewModel.exportBackup(summary = false) },
+                        enabled = !state.backupBusy,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (state.backupBusy) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Rounded.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.size(6.dp))
+                            Text("نسخة احتياطية")
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { restoreLauncher.launch(BackupManager.pickBackupIntent()) },
+                        enabled = !state.backupBusy,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Rounded.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text("استعادة")
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
                 Text(
-                    "لم يُرفع أي شيء إلى Google Drive في هذه النسخة. الربط يحتاج إعداد OAuth في Google Cloud، وقاعدة البيانات حاليًا محلية فقط.",
+                    "اضغط «نسخة احتياطية» ثم اختر تطبيق Drive من قائمة المشاركة لحفظ الملف في حسابك. على الجوال الجديد: ثبّت التطبيق ← استعادة ← اختر الملف من Drive.",
                     style = MaterialTheme.typography.labelSmall,
                     lineHeight = 18.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (state.backupStatus.isNotBlank()) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.shapes.medium)
+                            .padding(12.dp)
+                    ) {
+                        Text(state.backupStatus, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         }
 
         item {
             Text(
-                "مصاريفي • الإصدار 0.2.0 • العملة: الريال القطري (ر.ق)",
+                "مصاريفي • الإصدار 0.3.0 • العملة: الريال القطري (ر.ق)",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         }
+    }
+
+    state.restoreCandidate?.let { candidate ->
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelRestore() },
+            title = { Text("استعادة نسخة احتياطية") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("الملف يحتوي:", style = MaterialTheme.typography.titleSmall)
+                    Text("• ${candidate.accounts.size} حساب")
+                    Text("• ${candidate.transactions.size} عملية")
+                    Text("• ${candidate.smsDrafts.size} مسودة رسالة")
+                    Text(
+                        "«دمج» يضيف العمليات الجديدة فقط ويبقي بياناتك الحالية. «استبدال» يحذف الحالي ويستعيد الملف كما هو.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { viewModel.applyRestore(replaceExisting = false) }) { Text("دمج") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { viewModel.applyRestore(replaceExisting = true) }) {
+                        Text("استبدال الكل", color = MaterialTheme.colorScheme.error)
+                    }
+                    TextButton(onClick = { viewModel.cancelRestore() }) { Text("إلغاء") }
+                }
+            }
+        )
     }
 
     if (showPlan) PlanDialog(state.settings, { showPlan = false }) { salary, day, savings, commitments ->

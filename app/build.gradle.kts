@@ -20,8 +20,8 @@ android {
         applicationId = "com.masarify.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -38,7 +38,10 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
+            // نفس مفتاح توقيع الإصدار: يسمح بتثبيت النسخة الجديدة فوق القديمة كتحديث.
+            if (keystorePropsFile.exists()) signingConfig = signingConfigs.getByName("release")
+            // نفس معرّف الحزمة ونفس مفتاح التوقيع، حتى تُثبّت فوق أي نسخة سابقة
+            // بدون رسالة «التطبيق ليس مثبتًا» وبدون حذف البيانات.
             versionNameSuffix = "-debug"
         }
         release {
@@ -80,6 +83,8 @@ dependencies {
     implementation("androidx.glance:glance-appwidget:1.1.1")
     implementation("androidx.glance:glance-material3:1.1.1")
     testImplementation("junit:junit:4.13.2")
+    // نسخة حقيقية من org.json حتى تعمل اختبارات النسخ الاحتياطي على JVM
+    testImplementation("org.json:json:20240303")
     testImplementation("org.jetbrains.kotlin:kotlin-test:2.0.21")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")

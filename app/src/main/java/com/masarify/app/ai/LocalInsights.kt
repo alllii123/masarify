@@ -54,8 +54,14 @@ private fun pct(part: Long, whole: Long): Int =
 
 private fun shorten(amount: Long): String = formatMoney(amount, withCurrency = false)
 
-/** ملاحظات ذكية تظهر في الرئيسية وفي صفحة المساعد. */
-fun localInsights(snapshot: MoneySnapshot): List<Insight> {
+/** ملاحظات ذكية تظهر في الرئيسية وفي صفحة المساعد. لا ترمي استثناءات أبدًا. */
+fun localInsights(snapshot: MoneySnapshot): List<Insight> = try {
+    buildInsights(snapshot)
+} catch (t: Throwable) {
+    listOf(Insight("تعذّر تحليل الأرقام", "راجع عملياتك أو أضف بيانات أكثر ثم أعد المحاولة."))
+}
+
+private fun buildInsights(snapshot: MoneySnapshot): List<Insight> {
     val out = mutableListOf<Insight>()
 
     if (snapshot.expenses.isEmpty() && snapshot.cycleIncome <= 0L) {
@@ -111,10 +117,10 @@ fun localInsights(snapshot: MoneySnapshot): List<Insight> {
     val biggest = snapshot.expenses.maxByOrNull { it.amount }
     if (biggest != null && snapshot.expenses.size >= 4) {
         val avgOther = (snapshot.cycleExpense - biggest.amount) / (snapshot.expenses.size - 1).coerceAtLeast(1)
-        if (biggest.amount > avgOther * 3 && biggest.amount > 0) {
+        if (avgOther > 0 && biggest.amount > avgOther * 3) {
             out += Insight(
                 "فيه عملية كبيرة عن معتادك",
-                "«${biggest.merchant.ifBlank { biggest.category }}» بمبلغ ${formatMoney(biggest.amount)}، وهو تقريبًا ${biggest.amount / avgOther} أضعاف متوسط عملياتك. إذا كانت استثنائية، استثنِها من توقع نهاية الشهر.",
+                "«${biggest.merchant.ifBlank { biggest.category }}» بمبلغ ${formatMoney(biggest.amount)}، وهو تقريبًا ${if (avgOther > 0) (biggest.amount / avgOther).toString() else "أضعاف"} أضعاف متوسط عملياتك. إذا كانت استثنائية، استثنِها من توقع نهاية الشهر.",
                 Insight.Tone.NEUTRAL
             )
         }
@@ -169,8 +175,14 @@ fun localInsights(snapshot: MoneySnapshot): List<Insight> {
     return out.take(4)
 }
 
-/** أجوبة جاهزة لأسئلة شائعة، بدون إنترنت. */
-fun localAnswer(question: String, snapshot: MoneySnapshot): String {
+/** أجوبة جاهزة لأسئلة شائعة، بدون إنترنت. لا تُرجع فراغًا أبدًا. */
+fun localAnswer(question: String, snapshot: MoneySnapshot): String = try {
+    buildAnswer(question, snapshot)
+} catch (t: Throwable) {
+    "صار خطأ بسيط في التحليل المحلي: ${t.javaClass.simpleName}. جرّب سؤال أبسط، أو أرسل التقرير من الإعدادات."
+}
+
+private fun buildAnswer(question: String, snapshot: MoneySnapshot): String {
     val q = question.trim()
     if (q.isBlank()) return "اكتب سؤالك، مثل: كم باقي لي؟ وين أصرف أكثر؟ أقدر أوفر كم؟"
 

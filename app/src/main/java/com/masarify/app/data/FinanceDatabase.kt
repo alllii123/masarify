@@ -13,7 +13,10 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
+import androidx.room.withTransaction
+import com.masarify.app.backup.RestoreParsed
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 
 @Entity(tableName = "accounts")
 data class AccountEntity(
@@ -73,6 +76,15 @@ interface AccountDao {
 
     @Query("UPDATE accounts SET currentBalance = currentBalance + :delta WHERE id = :accountId")
     suspend fun adjustBalance(accountId: Long, delta: Long)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(accounts: List<AccountEntity>)
+
+    @Query("DELETE FROM accounts")
+    suspend fun clear()
+
+    @Query("SELECT COUNT(*) FROM accounts WHERE id = :accountId")
+    suspend fun exists(accountId: Long): Int
 }
 
 @Dao
@@ -120,6 +132,12 @@ interface FinanceDao {
 
     @Query("UPDATE accounts SET currentBalance = currentBalance + :delta WHERE id = :accountId")
     suspend fun adjustAccount(accountId: Long, delta: Long)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTransactions(rows: List<TransactionEntity>): List<Long>
+
+    @Query("SELECT COUNT(*) FROM transactions")
+    suspend fun count(): Int
 }
 
 @Dao
@@ -135,6 +153,9 @@ interface SmsDraftDao {
 
     @Query("DELETE FROM sms_drafts")
     suspend fun clear()
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAll(drafts: List<SmsDraftEntity>)
 }
 
 @Database(
@@ -163,6 +184,29 @@ class FinanceRepository(private val db: MasarifyDatabase) {
     val accounts = db.accountDao().observeAccounts()
     val transactions = db.financeDao().observeTransactions()
     val smsDrafts = db.smsDraftDao().observeDrafts()
+
+    suspend fun accountsOnce(): List<AccountEntity> = db.accountDao().accountsOnce()
+    suspend fun transactionsOnce(): List<TransactionEntity> = db.financeDao().transactionsOnce()
+    suspend fun draftsOnce(): List<SmsDraftEntity> = db.smsDraftDao().observeDrafts().first()
+
+    /**
+     * استعادة نسخة احتياطية. الوضع الافتراضي دمج آمن (بدون حذف بياناتك الحالية)،
+     * ويمكن اختيار الاستبدال الكامل.
+     */
+    suspend fun restore(parsed: RestoreParsed, replaceExisting: Boolean) {
+        db.withTransaction {
+            if (replaceExisting) {
+                db.financeDao().clearTransactions()
+                db.smsDraftDao().clear()
+                db.accountDao().clear()
+            }
+            db.accountDao().insertAll(parsed.accounts)
+            db.financeDao().insertTransactions(
+                parsed.transactions.filter { db.accountDao().exists(it.accountId) > 0 }
+            )
+            db.smsDraftDao().insertAll(parsed.smsDrafts)
+        }
+    }
 
     suspend fun ensureSetup() {
         if (db.accountDao().count() == 0) {

@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
@@ -30,6 +31,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -50,6 +53,7 @@ import com.masarify.app.ai.ChatMessage
 import com.masarify.app.ai.Insight
 import com.masarify.app.ai.MoneySnapshot
 import com.masarify.app.ai.localInsights
+import com.masarify.app.data.AiMode
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -110,14 +114,59 @@ fun AssistantScreen(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Rounded.CloudOff, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(14.dp))
+                    Icon(
+                        if (settings.aiMode == AiMode.LOCAL) Icons.Rounded.CloudOff else Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(14.dp)
+                    )
                     Spacer(Modifier.size(5.dp))
                     Text(
-                        "خصوصية",
+                        when (settings.aiMode) {
+                            AiMode.LOCAL -> "محلي"
+                            AiMode.AUTO -> "تلقائي"
+                            AiMode.CLOUD -> "سحابي"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
+            }
+        }
+
+        // مبدّل الوضع: يظهر دائمًا حتى يعرف المستخدم مين يجاوب
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = Space.page, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            AiMode.entries.forEach { mode ->
+                FilterChip(
+                    selected = settings.aiMode == mode,
+                    onClick = { viewModel.setAiMode(mode) },
+                    label = {
+                        Text(
+                            when (mode) {
+                                AiMode.LOCAL -> "محلي"
+                                AiMode.AUTO -> "تلقائي"
+                                AiMode.CLOUD -> "سحابي"
+                            },
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    },
+                    leadingIcon = {
+                        if (settings.aiMode == mode) {
+                            Icon(
+                                if (mode == AiMode.LOCAL) Icons.Rounded.CloudOff else Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                )
             }
         }
 
@@ -164,7 +213,12 @@ fun AssistantScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "الردود من التحليل المحلي. تقدر تربط مساعد سحابي من الإعدادات.",
+                            when {
+                                settings.aiMode == AiMode.LOCAL -> "الوضع المحلي: يشتغل بدون إنترنت ولا يرسل شيء."
+                                settings.aiMode == AiMode.CLOUD && !settings.aiCloudReady -> "اخترت السحابي لكن المفتاح غير مضاف — راح أجاوبك محليًا."
+                                settings.aiMode == AiMode.AUTO && !settings.aiCloudReady -> "تلقائي: محلي الآن. أضف مفتاح Gemini للرد السحابي."
+                                else -> "سحابي مفعّل — الأرقام ${if (settings.aiShareAmounts) "تُرسل" else "لا تُرسل"}."
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f)
@@ -182,7 +236,8 @@ fun AssistantScreen(
                         placeholder = { Text("اسألني: كم أقدر أصرف؟", fontSize = 13.sp) },
                         shape = RoundedCornerShape(20.dp),
                         maxLines = 4,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send)
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { send(input) })
                     )
                     Spacer(Modifier.size(8.dp))
                     Surface(

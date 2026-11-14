@@ -44,7 +44,7 @@ class MasarifyWidget : GlanceAppWidget() {
         val accounts = app.repository.accounts.first()
         val settings = app.settings.settings.first()
         val balance = accounts.sumOf { it.currentBalance }
-        val safe = (balance - settings.upcomingCommitments - settings.savingsTarget).coerceAtLeast(0)
+        val safe = com.masarify.app.util.safeToSpend(balance, settings.upcomingCommitments, settings.savingsTarget)
         val days = daysUntilSalary(settings.salaryDay)
         val green = settings.themeColor == ThemeColor.GREEN
         val background = if (green) Color(0xFFE5F2EB) else Color(0xFFE5EDF8)

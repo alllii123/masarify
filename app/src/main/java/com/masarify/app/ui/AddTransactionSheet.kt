@@ -45,7 +45,7 @@ fun AddTransactionSheet(accounts: List<AccountEntity>, onDismiss: () -> Unit, on
     val expenseCategories = listOf("بقالة", "مطاعم", "مواصلات", "تسوق", "منزل", "صحة", "ترفيه", "أخرى")
     val incomeCategories = listOf("راتب", "دخل إضافي", "تحويل وارد", "أخرى")
 
-    Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = Space.page, vertical = 8.dp)) {
         Text("إضافة عملية", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text("تسجيل سريع، وتُحفظ البيانات على جهازك", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(18.dp))
@@ -60,7 +60,7 @@ fun AddTransactionSheet(accounts: List<AccountEntity>, onDismiss: () -> Unit, on
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = amount, onValueChange = { amount = it }, modifier = Modifier.fillMaxWidth(),
-            label = { Text("المبلغ") }, suffix = { Text("ر.س") }, singleLine = true,
+            label = { Text("المبلغ") }, suffix = { Text(com.masarify.app.util.CURRENCY_LABEL) }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             textStyle = MaterialTheme.typography.headlineMedium
         )

@@ -19,6 +19,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Savings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -56,8 +59,8 @@ fun TransactionsScreen(state: UiState, contentPadding: PaddingValues, onSettings
     }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, contentPadding.calculateBottomPadding() + 18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(start = Space.page, end = Space.page, top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding() + 26.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.gap)
     ) {
         item { PageHeader("العمليات", "كل دخلك ومصروفك في مكان واحد", onSettings) }
         item {
@@ -84,8 +87,8 @@ fun PlanningScreen(state: UiState, contentPadding: PaddingValues, onSettings: ()
     val settings = state.settings
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, contentPadding.calculateBottomPadding() + 18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(start = Space.page, end = Space.page, top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding() + 26.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.gap)
     ) {
         item { PageHeader("التخطيط", "خطة دورة الراتب والالتزامات والادخار", onSettings) }
         item {
@@ -156,7 +159,7 @@ fun PlanDialog(settings: UserSettings, onDismiss: () -> Unit, onSave: (Long, Int
 
 @Composable
 fun MoneyField(label: String, value: String, onValueChange: (String) -> Unit) {
-    OutlinedTextField(value = value, onValueChange = onValueChange, label = { Text(label) }, suffix = { Text("ر.س") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+    OutlinedTextField(value = value, onValueChange = onValueChange, label = { Text(label) }, suffix = { Text(com.masarify.app.util.CURRENCY_LABEL) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
 }
 
 @Composable
@@ -169,15 +172,15 @@ fun ReportsScreen(state: UiState, contentPadding: PaddingValues, onSettings: () 
     val max = categories.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp, 6.dp, 16.dp, contentPadding.calculateBottomPadding() + 18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(start = Space.page, end = Space.page, top = contentPadding.calculateTopPadding(), bottom = contentPadding.calculateBottomPadding() + 26.dp),
+        verticalArrangement = Arrangement.spacedBy(Space.gap)
     ) {
         item { PageHeader("التقارير", LocalDate.now().format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale("ar", "SA"))), onSettings) }
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SmallMetric("الدخل", formatMoney(income), Modifier.weight(1f))
-                SmallMetric("المصروف", formatMoney(expense), Modifier.weight(1f))
-                SmallMetric("الصافي", formatMoney(income - expense), Modifier.weight(1f))
+                MetricCard("الدخل", formatMoney(income), Icons.Rounded.ArrowDownward, MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                MetricCard("المصروف", formatMoney(expense), Icons.Rounded.ArrowUpward, MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                MetricCard("الصافي", formatMoney(income - expense), Icons.Rounded.Savings, MaterialTheme.colorScheme.tertiary, modifier = Modifier.weight(1f))
             }
         }
         item {

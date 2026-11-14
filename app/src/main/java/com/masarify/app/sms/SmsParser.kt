@@ -14,12 +14,18 @@ data class ParsedSms(
 
 object SmsParser {
     private val salaryWords = listOf("راتب", "رواتب", "salary", "payroll")
-    private val incomeWords = listOf("إيداع", "ايداع", "deposit", "credited", "حوالة واردة", "تحويل وارد", "credit")
-    private val expenseWords = listOf("شراء", "purchase", "سحب", "withdraw", "pos", "دفع", "payment", "خصم")
+    private val incomeWords = listOf(
+        "إيداع", "ايداع", "deposit", "credited", "حوالة واردة", "تحويل وارد", "credit",
+        "تم إضافة", "تم اضافة", "رصيد دائن", "استلام حوالة"
+    )
+    private val expenseWords = listOf(
+        "شراء", "مشتريات", "purchase", "سحب", "withdraw", "pos", "دفع", "payment", "خصم",
+        "مدين", "تم خصم", "عملية"
+    )
     private val amountPatterns = listOf(
-        Regex("(?i)(?:SAR|SR)\\s*([0-9][0-9,]*(?:\\.[0-9]{1,2})?)"),
-        Regex("(?i)([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\s*(?:SAR|SR)"),
-        Regex("([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\s*(?:ر\\.س|ريال|رس)")
+        Regex("(?i)(?:QAR|QR)\\s*([0-9][0-9,]*(?:\\.[0-9]{1,2})?)"),
+        Regex("(?i)([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\s*(?:QAR|QR)"),
+        Regex("([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\s*(?:ر\\.ق|ريال|رس)")
     )
 
     fun parse(body: String, sender: String = ""): ParsedSms? {

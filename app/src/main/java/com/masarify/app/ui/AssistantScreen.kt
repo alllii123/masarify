@@ -189,6 +189,11 @@ fun AssistantScreen(
                     items(insights) { insight -> InsightCard(insight) }
                 }
                 item { QuickQuestions() { send(it) } }
+                if (settings.aiCloudReady) {
+                    item {
+                        com.masarify.app.ui.SpeedHint(settings.aiModel)
+                    }
+                }
             } else {
                 items(messages, key = { it.id }) { message ->
                     ChatBubble(message)
@@ -379,6 +384,7 @@ private fun ChatBubble(message: ChatMessage) {
                         append(" • ")
                         append(if (message.source == "cloud") "سحابي" else "محلي")
                     }
+                    message.elapsedMs?.let { append(" • ${it / 1000}.${(it % 1000) / 100} ث") }
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -391,6 +397,31 @@ private fun ChatBubble(message: ChatMessage) {
                     color = MaterialTheme.colorScheme.error
                 )
             }
+        }
+    }
+}
+
+/** تلميح صغير يوضح الموديل الحالي وسرعته المتوقعة. */
+@Composable
+fun SpeedHint(model: String) {
+    val fast = model.contains("lite")
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (fast) "⚡" else "🧠",
+                style = MaterialTheme.typography.titleSmall
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(
+                if (fast) "الموديل «$model» سريع جدًا — مناسب للمحادثة اليومية."
+                else "الموديل «$model» أدق لكنه أبطأ. لو الرد يطول، بدّله إلى gemini-2.5-flash-lite من الإعدادات.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

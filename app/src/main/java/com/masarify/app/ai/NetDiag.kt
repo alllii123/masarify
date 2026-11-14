@@ -53,18 +53,24 @@ object NetDiag {
             val type = connection.contentType ?: ""
             connection.disconnect()
             when {
-                code in 200..499 -> Line(true, "تم الاتصال في $ms مللي (رمز $code، TLS نوع $type)")
+                // 404 على الجذر أمر طبيعي: الخادم يستجيب لكن لا توجد صفحة على /
+                code in 200..499 -> Line(true, "اتصال آمن ناجح في $ms مللي (TLS: ${type.substringBefore(';')})")
                 else -> Line(false, "فشل الاتصال برمز $code")
             }
         }
 
         // 4) حضور المفتاح
-        out += step("مفتاح API") {
+        // توجد صيغتان مقبولتان الآن:
+        //  - القديمة: AIza… وطولها 39 حرفًا
+        //  - الجديدة: AQ.Ab8… وطولها 53 حرفًا
+        // الصيغة وحدها لا تكفي للحكم: الحكم النهائي هو رد Google في الخطوتين 5 و6.
+        out += step("شكل مفتاح API") {
             when {
                 apiKey.isBlank() -> Line(false, "المفتاح فارغ — أضفه ثم اضغط «حفظ المفتاح»")
-                apiKey.length < 20 -> Line(false, "المفتاح قصير جدًا (${apiKey.length} حرفًا). عادة 39 حرفًا ويبدأ بـ AIza")
-                apiKey.startsWith("AIza") && apiKey.length >= 35 -> Line(true, "الشكل صحيح (${apiKey.length} حرفًا)")
-                else -> Line(false, "الشكل غير معتاد: طول ${apiKey.length}، البداية «${apiKey.take(4)}». الأغلب أنه غير مكتمل — أعد نسخه من AI Studio")
+                apiKey.length < 20 -> Line(false, "المفتاح قصير جدًا (${apiKey.length} حرفًا) — أعد نسخه")
+                apiKey.startsWith("AIza") -> Line(true, "صيغة قديمة صحيحة (${apiKey.length} حرفًا)")
+                apiKey.startsWith("AQ.") -> Line(true, "صيغة جديدة صحيحة (${apiKey.length} حرفًا) — تُقبل من Google")
+                else -> Line(true, "صيغة غير معروفة (${apiKey.length} حرفًا) — سيحددها فحص الصلاحية بالأسفل")
             }
         }
 

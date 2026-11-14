@@ -25,13 +25,21 @@ object CloudAiClient {
     private const val CONNECT_TIMEOUT = 25_000
     private const val READ_TIMEOUT = 90_000
 
-    /** الأحدث أولًا. لو رجع 404 ننتقل للتالي. */
+    /** الأسرع أولًا: موديلات lite ترد عادة في أقل من ثانية. */
     val candidateModels = listOf(
-        "gemini-flash-latest",
-        "gemini-3.5-flash",
-        "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
-        "gemini-3.1-flash-lite"
+        "gemini-flash-latest",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-3.5-flash"
+    )
+
+    /** خيارات تُعرض للمستخدم في الإعدادات. */
+    val suggestedModels = listOf(
+        "gemini-2.5-flash-lite" to "الأسرع (موصى به)",
+        "gemini-flash-latest" to "الأحدث",
+        "gemini-2.5-flash" to "متوازن",
+        "gemini-2.5-pro" to "الأدق والأبطأ"
     )
 
     /** يقرأ الموديلات المتاحة فعليًا على مفتاح المستخدم. */
@@ -100,12 +108,14 @@ object CloudAiClient {
                 }
             }
 
-            val body = JSONObject().apply {
+            fun buildBody(disableThinking: Boolean): String = JSONObject().apply {
                 put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
                 put("contents", contents)
                 put("generationConfig", JSONObject().apply {
                     put("temperature", 0.4)
-                    put("maxOutputTokens", 900)
+                    put("maxOutputTokens", 800)
+                    // تقليل التفكير الداخلي يسرّع الرد كثيرًا على موديلات 2.5+
+                    if (disableThinking) put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
                 })
             }.toString()
 
@@ -113,6 +123,8 @@ object CloudAiClient {
             var lastError = "تعذّر الاتصال بالمساعد."
 
             for (candidate in modelsToTry) {
+              var retriedWithoutThinking = false
+              while (true) {
                 val connection = (URL("$HOST/models/$candidate:generateContent").openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = CONNECT_TIMEOUT
@@ -123,7 +135,7 @@ object CloudAiClient {
                 }
 
                 try {
-                    connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                    connection.outputStream.use { it.write(buildBody(!retriedWithoutThinking).toByteArray(Charsets.UTF_8)) }
                     val code = connection.responseCode
                     val payload = (if (code in 200..299) connection.inputStream else connection.errorStream)
                         ?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
@@ -131,6 +143,12 @@ object CloudAiClient {
                     if (code == 404) {
                         lastError = "الموديل «$candidate» غير متاح لمفتاحك."
                         continue // جرّب الموديل التالي
+                    }
+                    if (code == 400 && payload.contains("thinking", ignoreCase = true) && !retriedWithoutThinking) {
+                        // بعض الموديلات لا تدعم thinkingBudget: نعيد المحاولة بدونها
+                        retriedWithoutThinking = true
+                        connection.disconnect()
+                        continue
                     }
                     if (code !in 200..299) error(friendlyHttpError(code, payload))
 
@@ -161,6 +179,8 @@ object CloudAiClient {
                 } finally {
                     connection.disconnect()
                 }
+                break
+              }
             }
             error("$lastError جرّب تحديث الموديلات من الإعدادات.")
         }

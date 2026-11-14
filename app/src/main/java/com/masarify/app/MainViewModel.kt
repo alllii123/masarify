@@ -288,6 +288,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 AiStyle.ANALYST -> "تحليلي مع أرقام"
             }
 
+            val startedAt = System.currentTimeMillis()
             CloudAiClient.ask(
                 apiKey = settings.aiApiKey,
                 model = settings.aiModel,
@@ -296,7 +297,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 history = history + CloudAiClient.Message("user", text)
             ).fold(
                 onSuccess = { answer ->
-                    chat.update { it + ChatMessage(role = "model", text = answer, source = "cloud") }
+                    chat.update {
+                        it + ChatMessage(
+                            role = "model",
+                            text = answer,
+                            source = "cloud",
+                            elapsedMs = System.currentTimeMillis() - startedAt,
+                            model = settings.aiModel
+                        )
+                    }
                 },
                 onFailure = { error ->
                     val message = error.message ?: "تعذّر الوصول للمساعد السحابي."

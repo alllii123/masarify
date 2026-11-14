@@ -10,5 +10,8 @@ data class ChatMessage(
     val text: String,
     val time: LocalDateTime = LocalDateTime.now(),
     val source: String? = null,   // "local" أو "cloud" أو "error"
-    val error: String? = null
+    val error: String? = null,
+    /** زمن رد السحابة بالمللي — يظهر للمستخدم ليعرف السرعة الفعلية. */
+    val elapsedMs: Long? = null,
+    val model: String? = null
 )

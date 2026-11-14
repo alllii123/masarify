@@ -111,7 +111,9 @@ object NetDiag {
                 onSuccess = { reply ->
                     Line(true, "رد خلال ${System.currentTimeMillis() - start} مللي: «${reply.take(40)}»")
                 },
-                onFailure = { error -> Line(false, error.message ?: "فشل غير معروف") }
+                onFailure = { error ->
+                    Line(false, "تعذّر التوليد: ${(error.message ?: "سبب غير معروف").replace("\n", " ").take(160)}")
+                }
             )
         }
 

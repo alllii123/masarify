@@ -17,15 +17,18 @@ import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 /**
- * عميل Gemini اختياري مبني على OkHttp.
+ * عميل Gemini.
  *
- * لماذا OkHttp بدل HttpURLConnection؟
- * على شبكات الجوال يحدث كثيرًا أن الاتصال الأول يبقى معلّقًا (شوهد 111 ثانية)
- * ثم يُرفض طلب ثانٍ بـ UnknownHostException. OkHttp يعيد استخدام الاتصال،
- * ويتعامل مع IPv4/IPv6 وTLS بشكل أفضل، ويعطي مهلات واضحة لكل مرحلة.
+ * ── درس من الميدان ──────────────────────────────────────────────────────────
+ * أضفنا سابقًا `thinkingConfig.thinkingBudget = 0` لتسريع الردود، فردّت Google:
+ * «Request contains an invalid argument» (400). الموديلات تختلف في دعم هذا الحقل
+ * ولا تُفصح عن السبب بوضوح.
  *
- * - المفتاح يبقى على الجهاز في DataStore ولا يُسجّل في أي log.
- * - يجرّب أكثر من اسم موديل لأن Google تُعيد تسمية/إنهاء الموديلات.
+ * الحل: «سلّم توافق» — نجرّب جسم الطلب بالكامل، وإذا جاء 400 نُنقص الحقول
+ * الاختيارية واحدًا واحدًا حتى ينجح. لا نعتمد على تخمين أي حقل يقبله الموديل.
+ *
+ * ولماذا HTTP/1.1 وبدون إعادة استخدام اتصالات: على شبكات الجوال هنا
+ * نجح GET وفشل POST على اتصال HTTP/2 معاد استخدامه.
  */
 object CloudAiClient {
 
@@ -33,18 +36,11 @@ object CloudAiClient {
 
     private const val HOST = "https://generativelanguage.googleapis.com/v1beta"
     private const val CONNECT_TIMEOUT = 12L
-    private const val READ_TIMEOUT = 30L
-    /** إجمالي الطلب: 35 ثانية كحد أقصى، فلا ينتظر المستخدم أكثر. */
-    private const val CALL_TIMEOUT = 35L
+    private const val READ_TIMEOUT = 25L
+    private const val CALL_TIMEOUT = 30L
 
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
-    /**
-     * HTTP/1.1 مقصود، لا HTTP/2:
-     * على شبكات الجوال في قطر لوحظ أن اتصال HTTP/2 المعاد استخدامه يُعلّق عند POST
-     * بينما GET ينجح. HTTP/1.1 يتصرف بشكل متوقع مع هذه الشبكات،
-     * وفرق السرعة لا يذكر في طلبات قصيرة مثل هذه.
-     */
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .protocols(listOf(Protocol.HTTP_1_1))
@@ -52,23 +48,21 @@ object CloudAiClient {
             .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
             .writeTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
             .callTimeout(CALL_TIMEOUT, TimeUnit.SECONDS)
-            // لا نعيد استخدام الاتصالات: كل طلب يفتح اتصالًا نظيفًا،
-            // فلا نرث اتصالًا ميتًا من طلب سابق.
             .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
             .retryOnConnectionFailure(true)
             .followRedirects(true)
             .build()
     }
 
-    /** الأسرع أولًا: موديلات lite ترد عادة في أقل من ثانية. */
+    /** الأسرع أولًا. */
     val candidateModels = listOf(
         "gemini-2.5-flash-lite",
         "gemini-flash-latest",
-        "gemini-3.5-flash-lite",
         "gemini-2.5-flash",
-        "gemini-3.5-flash"
+        "gemini-3.6-flash"
     )
 
+    /** يُعرض للمستخدم كاختيارات موصى بها. */
     val suggestedModels = listOf(
         "gemini-2.5-flash-lite" to "الأسرع (موصى به)",
         "gemini-flash-latest" to "الأحدث",
@@ -76,12 +70,21 @@ object CloudAiClient {
         "gemini-2.5-pro" to "الأدق والأبطأ"
     )
 
+    // ── سلّم التوافق ────────────────────────────────────────────────────────
+    // كل درجة أقل تعني حقولًا أقل. ننزل درجة واحدة عند 400 فقط.
+    private enum class BodyLevel {
+        FULL,          // systemInstruction + maxOutputTokens + temperature
+        NO_SYSTEM,     // بدون systemInstruction (يُدمج في أول رسالة)
+        MINIMAL        // contents فقط
+    }
+
     // ────────────────────────────────────────────────────────────────────────
     suspend fun listModels(apiKey: String): Result<List<String>> = withContext(Dispatchers.IO) {
         runCatching {
             val request = Request.Builder()
                 .url("$HOST/models?pageSize=200")
                 .header("x-goog-api-key", apiKey)
+                .header("Accept", "application/json")
                 .get()
                 .build()
 
@@ -98,7 +101,11 @@ object CloudAiClient {
                             methods.optString(it).contains("generateContent")
                         }
                         val name = model.optString("name").removePrefix("models/")
-                        if (canGenerate && name.isNotBlank()) add(name)
+                        // نستبعد موديلات الصوت والصور لأنها لا تُستخدم في المحادثة النصية
+                        val unusable = name.contains("tts") || name.contains("image") ||
+                            name.contains("embedding") || name.contains("aqa") ||
+                            name.startsWith("gemma")
+                        if (canGenerate && name.isNotBlank() && !unusable) add(name)
                     }
                 }
             }
@@ -106,6 +113,7 @@ object CloudAiClient {
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    /** الطلب العادي (غير متدفّق). */
     suspend fun ask(
         apiKey: String,
         model: String,
@@ -114,109 +122,11 @@ object CloudAiClient {
         history: List<Message>
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val system = buildString {
-                append("أنت مساعد مالي شخصي داخل تطبيق «مصاريفي» في قطر. ")
-                append("استخدم الريال القطري (ر.ق) في كل الأرقام. ")
-                append("أجب بالعربية العامية الخليجية المبسطة، باختصار وبدون مقدمات طويلة. ")
-                append("اعتمد فقط على الأرقام الموجودة في السياق ولا تخترع أرقامًا. ")
-                append("لو طُلب منك نصيحة استثمار أو قرض، وضّح أن هذا ليس استشارة مالية رسمية. ")
-                append("الأسلوب المطلوب: $style. ")
-                append("سياق بيانات المستخدم: $context")
-            }
-
-            val contents = JSONArray().apply {
-                history.takeLast(10).forEach { message ->
-                    put(
-                        JSONObject().apply {
-                            put("role", if (message.role == "user") "user" else "model")
-                            put("parts", JSONArray().put(JSONObject().put("text", message.text)))
-                        }
-                    )
-                }
-                if (history.isEmpty()) {
-                    put(
-                        JSONObject().apply {
-                            put("role", "user")
-                            put("parts", JSONArray().put(JSONObject().put("text", "أعطني ملخصًا سريعًا لوضعي المالي.")))
-                        }
-                    )
-                }
-            }
-
-            fun buildBody(withThinkingConfig: Boolean): String = JSONObject().apply {
-                put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
-                put("contents", contents)
-                put("generationConfig", JSONObject().apply {
-                    put("temperature", 0.4)
-                    put("maxOutputTokens", 800)
-                    if (withThinkingConfig) put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
-                })
-            }.toString()
-
-            val modelsToTry = (listOf(model.ifBlank { "" }) + candidateModels).filter { it.isNotBlank() }.distinct()
-            var lastError = "تعذّر الاتصال بالمساعد."
-
-            for (candidate in modelsToTry) {
-                var withThinking = true
-                var attempt = 0
-                while (attempt < 2) {
-                    attempt++
-                    val request = Request.Builder()
-                        .url("$HOST/models/$candidate:generateContent")
-                        .header("x-goog-api-key", apiKey)
-                        .header("Content-Type", "application/json")
-                        .post(buildBody(withThinking).toRequestBody(JSON))
-                        .build()
-
-                    val outcome = try {
-                        client.newCall(request).execute().use { response ->
-                            val payload = response.body?.string().orEmpty()
-                            when {
-                                response.code == 404 -> Outcome.Skip
-                                response.code == 400 && payload.contains("thinking", true) && withThinking -> {
-                                    withThinking = false
-                                    Outcome.Retry
-                                }
-                                !response.isSuccessful -> Outcome.Fail(friendlyHttpError(response.code, payload))
-                                else -> Outcome.Ok(extractText(payload))
-                            }
-                        }
-                    } catch (e: SocketTimeoutException) {
-                        Outcome.Fail("انتهت مدة الانتظار (${CALL_TIMEOUT}ث). جرّب WiFi بدل بيانات الجوال، أو بدّل الوضع إلى «محلي».")
-                    } catch (e: UnknownHostException) {
-                        Outcome.Retry
-                    } catch (e: java.net.ConnectException) {
-                        Outcome.Retry
-                    } catch (e: IOException) {
-                        Outcome.Retry
-                    }
-
-                    when (outcome) {
-                        is Outcome.Ok -> return@runCatching outcome.text
-                        is Outcome.Fail -> error(outcome.message)
-                        Outcome.Skip -> {
-                            lastError = "الموديل «$candidate» غير متاح لمفتاحك."
-                            break
-                        }
-                        Outcome.Retry -> {
-                            // إعادة محاولة واحدة بعد مهلة قصيرة — تعالج انقطاعات شبكة الجوال
-                            if (attempt < 2) delay(700) else {
-                                lastError = "تعذّر الاتصال بالشبكة. جرّب تشغيل/إيقاف WiFi ثم أعد المحاولة."
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-            error(lastError)
+            attempt(apiKey, model, style, context, history, streaming = false) { }
         }
     }
 
-    /**
-     * نسخة تدعم البثّ (streamGenerateContent): ترسل النص تدريجيًا.
-     * مفيدة لو الطلب العادي يعلّق على شبكة معينة، لأن أول بايت يصل بسرعة
-     * ويُبطل انتظار الخادم الطويل.
-     */
+    /** البثّ: يظهر النص أثناء وصوله. المسار المفضّل في التطبيق. */
     suspend fun askStreaming(
         apiKey: String,
         model: String,
@@ -226,138 +136,214 @@ object CloudAiClient {
         onChunk: (String) -> Unit
     ): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val body = buildRequestBody(style, context, history, "stream")
-            val candidates = (listOf(model.ifBlank { "" }) + candidateModels).filter { it.isNotBlank() }.distinct()
-            var lastError = "تعذّر الاتصال."
-
-            for (candidate in candidates) {
-                val request = Request.Builder()
-                    .url("$HOST/models/$candidate:streamGenerateContent?alt=sse")
-                    .header("x-goog-api-key", apiKey)
-                    .header("Content-Type", "application/json")
-                    .post(body.toRequestBody(JSON))
-                    .build()
-
-                try {
-                    client.newCall(request).execute().use { response ->
-                        if (response.code == 404) {
-                            lastError = "الموديل «$candidate» غير متاح."
-                            return@use
-                        }
-                        if (!response.isSuccessful) {
-                            error(friendlyHttpError(response.code, response.body?.string().orEmpty()))
-                        }
-
-                        val source = response.body?.source() ?: error("لا يوجد رد")
-                        val builder = StringBuilder()
-                        while (!source.exhausted()) {
-                            val line = source.readUtf8Line() ?: break
-                            if (!line.startsWith("data:")) continue
-                            val json = line.removePrefix("data:").trim()
-                            if (json.isEmpty() || json == "[DONE]") continue
-                            val delta = runCatching {
-                                JSONObject(json).getJSONArray("candidates").getJSONObject(0)
-                                    .getJSONObject("content").getJSONArray("parts").let { parts ->
-                                        buildString {
-                                            for (i in 0 until parts.length()) {
-                                                append(parts.getJSONObject(i).optString("text"))
-                                            }
-                                        }
-                                    }
-                            }.getOrDefault("")
-                            if (delta.isNotEmpty()) {
-                                builder.append(delta)
-                                onChunk(builder.toString())
-                            }
-                        }
-                        if (builder.isBlank()) error("رد فارغ من البثّ.")
-                        return@runCatching builder.toString()
-                    }
-                } catch (e: IOException) {
-                    lastError = "انقطاع الشبكة أثناء البثّ: ${e.message ?: "غير معروف"}"
-                }
-            }
-            error(lastError)
+            attempt(apiKey, model, style, context, history, streaming = true, onChunk = onChunk)
         }
     }
 
-    /** يبني جسم الطلب مرة واحدة ليستخدمه النمط العادي والبثّ. */
-    private fun buildRequestBody(
+    // ────────────────────────────────────────────────────────────────────────
+    private suspend fun attempt(
+        apiKey: String,
+        model: String,
         style: String,
         context: String,
         history: List<Message>,
-        mode: String
+        streaming: Boolean,
+        onChunk: (String) -> Unit
     ): String {
-        val system = buildString {
-            append("أنت مساعد مالي شخصي داخل تطبيق «مصاريفي» في قطر. ")
-            append("استخدم الريال القطري (ر.ق) في كل الأرقام. ")
-            append("أجب بالعربية العامية الخليجية المبسطة، باختصار وبدون مقدمات طويلة. ")
-            append("اعتمد فقط على الأرقام الموجودة في السياق ولا تخترع أرقامًا. ")
-            append("لو طُلب منك نصيحة استثمار أو قرض، وضّح أن هذا ليس استشارة مالية رسمية. ")
-            append("الأسلوب المطلوب: $style. ")
-            append("سياق بيانات المستخدم: $context")
+        val models = (listOf(model.ifBlank { "" }) + candidateModels).filter { it.isNotBlank() }.distinct()
+        var lastError = "تعذّر الاتصال بالمساعد."
+        val tried = mutableListOf<String>()
+
+        for (candidate in models) {
+            for (level in BodyLevel.entries) {
+                val url = if (streaming) {
+                    "$HOST/models/$candidate:streamGenerateContent?alt=sse"
+                } else {
+                    "$HOST/models/$candidate:generateContent"
+                }
+
+                val request = Request.Builder()
+                    .url(url)
+                    .header("x-goog-api-key", apiKey)
+                    .header("Content-Type", "application/json")
+                    .post(buildBody(style, context, history, level).toRequestBody(JSON))
+                    .build()
+
+                val result = try {
+                    client.newCall(request).execute().use { response ->
+                        val payload = response.body?.string().orEmpty()
+                        when {
+                            response.code == 404 -> Trial.Skip("الموديل «$candidate» غير متاح لمفتاحك")
+                            // 400 غالبًا حقل غير مدعوم: ننزل درجة في سلّم التوافق
+                            response.code == 400 -> Trial.Downgrade(snippet(payload))
+                            response.code == 401 || response.code == 403 -> Trial.Fatal(friendlyHttpError(response.code, payload))
+                            response.code == 429 -> Trial.Fatal(friendlyHttpError(response.code, payload))
+                            !response.isSuccessful -> Trial.Fatal(friendlyHttpError(response.code, payload))
+                            else -> {
+                                val text = if (streaming) parseSse(payload, onChunk) else extractText(payload)
+                                Trial.Ok(text)
+                            }
+                        }
+                    }
+                } catch (e: SocketTimeoutException) {
+                    Trial.RetryOrFail("انتهت مدة الانتظار (${CALL_TIMEOUT}ث). جرّب WiFi بدل بيانات الجوال.")
+                } catch (e: UnknownHostException) {
+                    Trial.RetryOrFail("تعذّر تحليل اسم الخادم — قد تكون الشبكة تحتاج تسجيل دخول")
+                } catch (e: IOException) {
+                    Trial.RetryOrFail("انقطاع الشبكة: ${e.message ?: "غير معروف"}")
+                }
+
+                when (result) {
+                    is Trial.Ok -> return result.text
+                    is Trial.Fatal -> error(result.message)
+                    is Trial.Skip -> {
+                        lastError = result.reason
+                        break
+                    }
+                    is Trial.Downgrade -> {
+                        lastError = "تعذّر إرسال الطلب: ${result.reason}"
+                        tried += "$candidate/$level"
+                        continue
+                    }
+                    is Trial.RetryOrFail -> {
+                        delay(500)
+                        lastError = result.reason
+                        tried += "$candidate/$level"
+                        continue
+                    }
+                }
+            }
         }
+        error(buildString {
+            append(lastError)
+            if (tried.isNotEmpty()) {
+                append("\n\nالمحاولات: ")
+                append(tried.take(4).joinToString("، "))
+            }
+        })
+    }
+
+    private sealed interface Trial {
+        data class Ok(val text: String) : Trial
+        data class Fatal(val message: String) : Trial
+        data class Skip(val reason: String) : Trial
+        data class Downgrade(val reason: String) : Trial
+        data class RetryOrFail(val reason: String) : Trial
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    private fun buildBody(
+        style: String,
+        context: String,
+        history: List<Message>,
+        level: BodyLevel
+    ): String {
+        val system = systemPrompt(style, context)
+
         val contents = JSONArray().apply {
             history.takeLast(10).forEach { message ->
-                put(
-                    JSONObject().apply {
-                        put("role", if (message.role == "user") "user" else "model")
-                        put("parts", JSONArray().put(JSONObject().put("text", message.text)))
-                    }
-                )
+                put(turn(message.role == "user", message.text))
             }
             if (history.isEmpty()) {
-                put(
-                    JSONObject().apply {
-                        put("role", "user")
-                        put("parts", JSONArray().put(JSONObject().put("text", "أعطني ملخصًا سريعًا لوضعي المالي.")))
-                    }
-                )
+                put(turn(true, "أعطني ملخصًا سريعًا لوضعي المالي."))
+            }
+            // في الدرجات الأدنى ندمج التعليمات داخل أول رسالة مستخدم
+            if (level != BodyLevel.FULL && length() > 0) {
+                val first = getJSONObject(0)
+                if (first.optString("role") == "user") {
+                    val parts = first.getJSONArray("parts")
+                    val original = parts.getJSONObject(0).optString("text")
+                    parts.put(0, JSONObject().put("text", "$system\n\nسؤال المستخدم: $original"))
+                }
             }
         }
+
         return JSONObject().apply {
-            put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
             put("contents", contents)
-            put("generationConfig", JSONObject().apply {
-                put("temperature", 0.4)
-                put("maxOutputTokens", 800)
-                put("thinkingConfig", JSONObject().put("thinkingBudget", 0))
-            })
+            if (level == BodyLevel.FULL) {
+                put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+                put("generationConfig", JSONObject().apply {
+                    put("temperature", 0.4)
+                    put("maxOutputTokens", 2048)
+                })
+            }
         }.toString()
     }
 
-    private sealed interface Outcome {
-        data class Ok(val text: String) : Outcome
-        data class Fail(val message: String) : Outcome
-        data object Skip : Outcome
-        data object Retry : Outcome
+    private fun turn(isUser: Boolean, text: String): JSONObject = JSONObject().apply {
+        put("role", if (isUser) "user" else "model")
+        put("parts", JSONArray().put(JSONObject().put("text", text)))
+    }
+
+    private fun systemPrompt(style: String, context: String) = buildString {
+        append("أنت مساعد مالي شخصي داخل تطبيق «مصاريفي» في قطر. ")
+        append("استخدم الريال القطري (ر.ق) في كل الأرقام. ")
+        append("أجب بالعربية العامية الخليجية المبسطة، باختصار وبدون مقدمات طويلة. ")
+        append("اعتمد فقط على الأرقام الموجودة في السياق ولا تخترع أرقامًا. ")
+        append("لو طُلب منك نصيحة استثمار أو قرض، وضّح أن هذا ليس استشارة مالية رسمية. ")
+        append("الأسلوب المطلوب: $style. ")
+        append("سياق بيانات المستخدم: $context")
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    private fun parseSse(payload: String, onChunk: (String) -> Unit): String {
+        val builder = StringBuilder()
+        payload.lineSequence().forEach { raw ->
+            if (!raw.startsWith("data:")) return@forEach
+            val json = raw.removePrefix("data:").trim()
+            if (json.isEmpty() || json == "[DONE]") return@forEach
+            val delta = runCatching { textFromJson(json) }.getOrNull().orEmpty()
+            if (delta.isNotEmpty()) {
+                builder.append(delta)
+                onChunk(builder.toString())
+            }
+        }
+        if (builder.isBlank()) {
+            // أحيانًا يرجع الخادم جسمًا عاديًا بدل SSE
+            val plain = runCatching { extractText(payload) }.getOrNull().orEmpty()
+            if (plain.isNotBlank()) {
+                onChunk(plain)
+                return plain
+            }
+            error("رد فارغ من المساعد. جرّب موديلًا آخر من الإعدادات.")
+        }
+        return builder.toString()
     }
 
     private fun extractText(payload: String): String {
-        val root = JSONObject(payload)
-        if (root.has("promptFeedback")) {
-            val reason = root.getJSONObject("promptFeedback").optString("blockReason")
-            if (reason.isNotBlank()) error("تم حجب الطلب من Google ($reason). أعد صياغة السؤال بشكل مالي واضح.")
-        }
-        val text = runCatching {
-            root.getJSONArray("candidates").getJSONObject(0)
-                .getJSONObject("content").getJSONArray("parts")
-                .let { parts ->
-                    buildString {
-                        for (i in 0 until parts.length()) append(parts.getJSONObject(i).optString("text"))
-                    }
-                }
-        }.getOrNull()?.trim().orEmpty()
-
+        val text = runCatching { textFromJson(payload) }.getOrNull().orEmpty()
         if (text.isBlank()) {
-            // موديلات التفكير قد ترجع محتوى فارغًا لو استهلكت الرموز في التفكير
             val finish = runCatching {
-                root.getJSONArray("candidates").getJSONObject(0).optString("finishReason")
+                JSONObject(payload).getJSONArray("candidates").getJSONObject(0).optString("finishReason")
             }.getOrDefault("")
-            error("وصل رد فارغ${if (finish.isNotBlank()) " ($finish)" else ""}. جرّب موديل lite أو أعد صياغة السؤال.")
+            val block = runCatching {
+                JSONObject(payload).getJSONObject("promptFeedback").optString("blockReason")
+            }.getOrDefault("")
+            error(
+                when {
+                    block.isNotBlank() -> "حجبت Google الطلب ($block). أعد صياغة السؤال بشكل مالي واضح."
+                    finish.isNotBlank() -> "رد فارغ (${finish}). جرّب موديل lite أو سؤالًا أقصر."
+                    else -> "رد فارغ. جرّب موديل lite من الإعدادات."
+                }
+            )
         }
         return text
     }
+
+    private fun textFromJson(payload: String): String {
+        val root = JSONObject(payload)
+        val candidates = root.optJSONArray("candidates") ?: return ""
+        if (candidates.length() == 0) return ""
+        val content = candidates.getJSONObject(0).optJSONObject("content") ?: return ""
+        val parts = content.optJSONArray("parts") ?: return ""
+        return buildString {
+            for (i in 0 until parts.length()) append(parts.getJSONObject(i).optString("text"))
+        }.trim()
+    }
+
+    private fun snippet(payload: String): String = runCatching {
+        JSONObject(payload).getJSONObject("error").optString("message")
+    }.getOrDefault("").ifBlank { payload.take(120) }
 
     suspend fun checkKey(apiKey: String, model: String): Result<String> =
         ask(apiKey, model, "مختصر جدًا", "snapshot: currency=QAR", emptyList())
@@ -367,11 +353,12 @@ object CloudAiClient {
             JSONObject(payload).getJSONObject("error").optString("message")
         }.getOrDefault("")
         return when (code) {
-            400 -> "الطلب غير صالح${if (detail.isNotBlank()) ": $detail" else "."}"
-            401, 403 -> "المفتاح غير مقبول. تأكد أن Generative Language API مفعّلة على مشروعك."
-            404 -> "الموديل غير موجود لمفتاحك. جرّب «تحديث الموديلات»."
-            429 -> "تجاوزت حد الطلبات للمفتاح. انتظر دقيقة أو استخدم الوضع المحلي."
-            500, 503 -> "خدمة Google مشغولة حاليًا. جرّب بعد قليل."
+            400 -> "الطلب غير مقبول${if (detail.isNotBlank()) ": $detail" else ""}"
+            401 -> "المفتاح غير مقبول${if (detail.isNotBlank()) ": $detail" else ""}. تأكد من نسخه كاملًا من AI Studio."
+            403 -> "الوصول ممنوع. تأكد أن Generative Language API مفعّلة على مشروعك."
+            404 -> "الموديل غير متاح لمفتاحك. جرّب «تحديث الموديلات»."
+            429 -> "تجاوزت حد الطلبات. انتظر دقيقة أو استخدم الوضع المحلي."
+            500, 503 -> "خدمة Google مشغولة. جرّب بعد قليل."
             else -> "فشل الاتصال (رمز $code)${if (detail.isNotBlank()) ": $detail" else "."}"
         }
     }

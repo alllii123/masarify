@@ -341,19 +341,29 @@ fun SettingsScreen(state: UiState, contentPadding: PaddingValues, onBack: () -> 
                                 }
                             }
                         )
-                        if (state.settings.aiAvailableModels.isNotEmpty()) {
-                            Spacer(Modifier.height(6.dp))
-                            Text("الموديلات المتاحة على مفتاحك:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val extraModels = state.settings.aiAvailableModels
+                            .filterNot { available -> com.masarify.app.ai.CloudAiClient.suggestedModels.any { it.first == available } }
+                        if (extraModels.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "موديلات أخرى متاحة على مفتاحك (${extraModels.size}):",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             Spacer(Modifier.height(4.dp))
-                            state.settings.aiAvailableModels.take(6).chunked(2).forEach { row ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    row.forEach { name ->
-                                        FilterChip(
-                                            selected = state.settings.aiModel == name,
-                                            onClick = { viewModel.setAiModel(name) },
-                                            label = { Text(name.removePrefix("gemini-"), style = MaterialTheme.typography.labelSmall) }
-                                        )
-                                    }
+                            extraModels.take(8).forEach { name ->
+                                Surface(
+                                    onClick = { viewModel.setAiModel(name) },
+                                    shape = CircleShape,
+                                    color = if (state.settings.aiModel == name) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        name,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                    )
                                 }
                             }
                         }

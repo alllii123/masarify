@@ -41,9 +41,10 @@ final class AssistantEngine {
     func execute(_ command: FinCommand) -> ChatMessage {
         switch command {
         case let .add(type, amount, category, merchant):
-            guard store.addTransaction(type: type, amount: amount, category: category,
-                                                merchant: merchant, note: "من المساعد",
-                                                source: "ASSISTANT") else {
+            let created = store.addTransaction(type: type, amount: amount, category: category,
+                                               merchant: merchant, note: "من المساعد",
+                                               source: "ASSISTANT")
+            guard created != nil else {
                 return ChatMessage(role: "model", text: "ما فيه حساب مسجل. أضف حسابًا أولًا.",
                                    source: "local", error: "لا يوجد حساب")
             }

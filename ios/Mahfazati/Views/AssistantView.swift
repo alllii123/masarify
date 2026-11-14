@@ -17,38 +17,7 @@ struct AssistantView: View {
             VStack(spacing: 0) {
                 modeChips
 
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 10) {
-                            if store.chat.isEmpty {
-                                intro
-                                quickActions
-                            }
-                            ForEach(messages) { message in
-                                BubbleView(message: message,
-                                           onConfirm: confirmPending,
-                                           onCancel: cancelPending)
-                                    .id(message.id)
-                            }
-                            if thinking {
-                                HStack(spacing: 8) {
-                                    ProgressView().controlSize(.small)
-                                    Text("أفكر في أرقامك…")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                }
-                            }
-                        }
-                        .padding(.horizontal, Space.page)
-                        .padding(.vertical, 8)
-                    }
-                    .onChange(of: store.chat.count) {
-                        if let last = messages.last {
-                            withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                        }
-                    }
-                }
+                messageList
 
                 inputBar
             }
@@ -65,6 +34,54 @@ struct AssistantView: View {
         .onAppear {
             if engine == nil { engine = AssistantEngine(store: store) }
         }
+    }
+
+    /// قائمة الرسائل في View منفصل: Swift كان يعجز عن استنتاج نوع تعريف
+    /// واحد كبير (error: unable to type-check in reasonable time).
+    private var messageList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    if store.chat.isEmpty {
+                        intro
+                        quickActions
+                    }
+                    messageRows
+                    if thinking { thinkingRow }
+                }
+                .padding(.horizontal, Space.page)
+                .padding(.vertical, 8)
+            }
+            .onChange(of: store.chat.count) {
+                scrollToBottom(proxy)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var messageRows: some View {
+        ForEach(messages) { message in
+            BubbleView(theme: store.theme,
+                       message: message,
+                       onConfirm: confirmPending,
+                       onCancel: cancelPending)
+                .id(message.id)
+        }
+    }
+
+    private var thinkingRow: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("أفكر في أرقامك…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        guard let last = messages.last else { return }
+        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
     }
 
     // ── مبدّل الوضع ──────────────────────────────────────────────────────

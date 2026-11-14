@@ -97,7 +97,7 @@ struct TransactionRow: View {
 
             Text("\(transaction.type.isExpense ? "−" : "+")\(Currency.format(transaction.amount))")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(transaction.type.isExpense ? .primary : .green)
+                .foregroundStyle(transaction.type.isExpense ? Color.primary : Color.green)
         }
         .padding(.vertical, 3)
     }

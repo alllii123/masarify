@@ -27,23 +27,7 @@ targets:
       - path: Mahfazati
         excludes:
           - "Info.plist"
-    info:
-      path: Mahfazati/Info.plist
-      properties:
-        CFBundleDisplayName: محفظتي
-        CFBundleDevelopmentRegion: ar
-        UILaunchScreen: {}
-        UIApplicationSceneManifest:
-          UIApplicationSupportsMultipleScenes: false
-        UISupportedInterfaceOrientations:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
-        UISupportedInterfaceOrientations~ipad:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
+    # Info.plist ملتزم في المستودع ويحتوي المتغيرات $(PRODUCT_BUNDLE_IDENTIFIER)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mahfazati.app
@@ -51,6 +35,7 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Mahfazati/Info.plist
         ENABLE_PREVIEWS: YES
         SWIFT_EMIT_LOC_STRINGS: YES
 

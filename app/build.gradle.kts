@@ -20,8 +20,8 @@ android {
         applicationId = "com.masarify.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.4.6"
+        versionCode = 9
+        versionName = "0.4.7"
         vectorDrawables { useSupportLibrary = true }
     }
 

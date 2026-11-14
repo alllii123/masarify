@@ -239,7 +239,7 @@ fun SettingsScreen(state: UiState, contentPadding: PaddingValues, onBack: () -> 
                     }
                     Spacer(Modifier.size(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("مساعد مصاريفي", style = MaterialTheme.typography.titleMedium)
+                        Text("مساعد محفظتي", style = MaterialTheme.typography.titleMedium)
                         Text("ذكاء محلي + مساعد سحابي اختياري", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -676,7 +676,7 @@ fun SettingsScreen(state: UiState, contentPadding: PaddingValues, onBack: () -> 
 
         item {
             Text(
-                "مصاريفي • الإصدار 0.3.0 • العملة: الريال القطري (ر.ق)",
+                "محفظتي • الإصدار ${com.masarify.app.BuildConfig.VERSION_NAME} • العملة: الريال القطري (ر.ق)",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),

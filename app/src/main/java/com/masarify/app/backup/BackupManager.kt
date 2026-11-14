@@ -72,7 +72,7 @@ object BackupManager {
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = BACKUP_MIME
             putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "نسخة احتياطية من مصاريفي — ${file.name}")
+            putExtra(Intent.EXTRA_SUBJECT, "نسخة احتياطية من محفظتي — ${file.name}")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(intent, "حفظ النسخة الاحتياطية في").apply {

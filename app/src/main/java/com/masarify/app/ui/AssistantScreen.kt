@@ -99,7 +99,7 @@ fun AssistantScreen(
             }
             Spacer(Modifier.size(11.dp))
             Column(Modifier.weight(1f)) {
-                Text("مساعد مصاريفي", style = MaterialTheme.typography.titleLarge)
+                Text("مساعد محفظتي", style = MaterialTheme.typography.titleLarge)
                 Text(
                     when {
                         settings.aiCloudReady -> "الوضع المحلي + السحابي"

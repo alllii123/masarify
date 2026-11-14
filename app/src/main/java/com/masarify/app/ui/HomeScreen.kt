@@ -406,7 +406,7 @@ private fun AssistantCard(insights: List<Insight>, onAssistant: () -> Unit) {
                 }
                 Spacer(Modifier.size(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("مساعد مصاريفي", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Text("مساعد محفظتي", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
                     Text(
                         "تحليل على جهازك • بدون إنترنت",
                         style = MaterialTheme.typography.labelSmall,

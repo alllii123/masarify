@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">مصاريفي</string>
+    <string name="app_name">محفظتي</string>
     <string name="sms_channel_name">رسائل البنك والعمليات</string>
     <string name="widget_description">المتاح بأمان وإضافة عملية</string>
 </resources>

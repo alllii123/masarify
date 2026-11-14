@@ -67,7 +67,7 @@ private fun WidgetContent(safe: Long, days: Int, background: Color, primary: Col
         modifier = GlanceModifier.fillMaxSize().background(background).padding(16.dp).clickable(onClick),
         verticalAlignment = Alignment.Vertical.CenterVertically
     ) {
-        Text("مصاريفي • المتاح بأمان", style = TextStyle(color = ColorProvider(primary), fontSize = 13.sp, fontWeight = FontWeight.Bold))
+        Text("محفظتي • المتاح بأمان", style = TextStyle(color = ColorProvider(primary), fontSize = 13.sp, fontWeight = FontWeight.Bold))
         Spacer(GlanceModifier.height(6.dp))
         Text(formatMoney(safe), style = TextStyle(color = ColorProvider(Color(0xFF17231F)), fontSize = 25.sp, fontWeight = FontWeight.Bold))
         Spacer(GlanceModifier.height(8.dp))

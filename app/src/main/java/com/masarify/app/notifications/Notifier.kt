@@ -37,7 +37,7 @@ object Notifier {
         )
         val title = if (isSalary) "تم رصد إيداع راتب" else "تم رصد عملية بنكية"
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText("${formatMoney(amount)} • افتح التطبيق للمراجعة")
             .setContentIntent(pending)

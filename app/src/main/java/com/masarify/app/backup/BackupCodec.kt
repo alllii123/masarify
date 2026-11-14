@@ -109,7 +109,7 @@ object BackupCodec {
     /** يقرأ نسخة احتياطية ويتحقق من شكلها قبل أي كتابة على قاعدة البيانات. */
     fun decode(raw: String): Result<Parsed> = runCatching {
         val root = JSONObject(raw)
-        require(root.optString("format") == "masarify-backup") { "الملف ليس نسخة احتياطية من مصاريفي" }
+        require(root.optString("format") == "masarify-backup") { "الملف ليس نسخة احتياطية من محفظتي" }
         require(root.optInt("schemaVersion", 1) <= 1) { "النسخة الاحتياطية أحدث من التطبيق. حدّث التطبيق أولًا." }
 
         val accounts = root.optJSONArray("accounts").orEmptyJson().mapIndexed { index, o ->

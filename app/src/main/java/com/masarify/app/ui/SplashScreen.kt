@@ -22,7 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AccountBalanceWallet
+import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -125,10 +125,10 @@ fun SplashScreen(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            Icons.Rounded.AccountBalanceWallet,
+                            Icons.Rounded.TrendingUp,
                             contentDescription = null,
                             tint = scheme.onPrimary,
-                            modifier = Modifier.size(44.dp)
+                            modifier = Modifier.size(46.dp)
                         )
                     }
                 }
@@ -142,7 +142,7 @@ fun SplashScreen(
                 modifier = Modifier.alpha(textAlpha.value)
             ) {
                 Text(
-                    "مصاريفي",
+                    "محفظتي",
                     style = MaterialTheme.typography.displaySmall,
                     fontWeight = FontWeight.Bold,
                     color = scheme.onBackground

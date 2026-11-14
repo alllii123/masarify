@@ -121,12 +121,35 @@ fun HomeScreen(
         item {
             SafeCard(
                 safe = snapshot.safe,
+                total = snapshot.totalBalance,
                 daily = daily,
                 days = days,
                 ratio = ratio,
                 expense = snapshot.cycleExpense,
                 income = snapshot.cycleIncome
             )
+        }
+
+        item {
+            // صف الأرقام الثلاثة التي يسأل عنها المستخدم دائمًا
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SumChip(
+                    label = "مجموعك",
+                    value = formatMoney(snapshot.totalBalance),
+                    highlighted = true,
+                    modifier = Modifier.weight(1f)
+                )
+                SumChip(
+                    label = "المتاح بأمان",
+                    value = formatMoney(snapshot.safe),
+                    modifier = Modifier.weight(1f)
+                )
+                SumChip(
+                    label = "يوميًا",
+                    value = formatMoney(daily),
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
 
         item {
@@ -239,6 +262,7 @@ fun HomeScreen(
 @Composable
 private fun SafeCard(
     safe: Long,
+    total: Long,
     daily: Long,
     days: Int,
     ratio: Float,
@@ -295,6 +319,21 @@ private fun SafeCard(
                 color = Color.White.copy(alpha = 0.72f),
                 style = MaterialTheme.typography.labelSmall
             )
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "مجموعك في كل الحسابات",
+                    color = Color.White.copy(alpha = 0.72f),
+                    style = MaterialTheme.typography.labelSmall
+                )
+                Spacer(Modifier.size(7.dp))
+                Text(
+                    formatMoney(total),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatPill("تقدر تصرف يوميًا", formatMoney(daily), Modifier.weight(1f))
@@ -316,6 +355,41 @@ private fun SafeCard(
                 )
             }
         }
+    }
+}
+
+/** شريحة رقم صغيرة موحّدة الشكل لصف الأرقام الرئيسية. */
+@Composable
+private fun SumChip(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    highlighted: Boolean = false
+) {
+    val scheme = MaterialTheme.colorScheme
+    Column(
+        modifier = modifier
+            .clip(MaterialTheme.shapes.large)
+            .background(
+                if (highlighted) scheme.primaryContainer else scheme.surfaceContainerHigh
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (highlighted) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
+            maxLines = 1
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            value,
+            style = MaterialTheme.typography.titleSmall,
+            color = if (highlighted) scheme.onPrimaryContainer else scheme.onSurface,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

@@ -36,8 +36,11 @@ object CloudAiClient {
 
     private const val HOST = "https://generativelanguage.googleapis.com/v1beta"
     private const val CONNECT_TIMEOUT = 12L
-    private const val READ_TIMEOUT = 25L
-    private const val CALL_TIMEOUT = 30L
+    private const val READ_TIMEOUT = 30L
+    private const val CALL_TIMEOUT = 40L
+
+    /** كم مرة نعيد نفس الموديل قبل الانتقال لغيره. */
+    private const val RETRIES_PER_MODEL = 2
 
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
@@ -54,18 +57,24 @@ object CloudAiClient {
             .build()
     }
 
-    /** الأسرع أولًا. */
+    /**
+     * ترتيب المحاولة عند الفشل.
+     *
+     * `gemini-flash-latest` أولًا لأن الاسم يُوجّه دائمًا لأحدث موديل flash متاح،
+     * فلا يمكن أن «يتقاعد» تحت أقدامنا كما حدث مع 2.0-flash. أما 2.5-flash-lite
+     * فقد أعلنت Google تقاعده في 2026-10-20، لذلك لا يصلح أن يكون الخيار الأول.
+     */
     val candidateModels = listOf(
-        "gemini-2.5-flash-lite",
         "gemini-flash-latest",
+        "gemini-2.5-flash-lite",
         "gemini-2.5-flash",
         "gemini-3.6-flash"
     )
 
     /** يُعرض للمستخدم كاختيارات موصى بها. */
     val suggestedModels = listOf(
-        "gemini-2.5-flash-lite" to "الأسرع (موصى به)",
-        "gemini-flash-latest" to "الأحدث",
+        "gemini-flash-latest" to "الأحدث (موصى به)",
+        "gemini-2.5-flash-lite" to "الأسرع",
         "gemini-2.5-flash" to "متوازن",
         "gemini-2.5-pro" to "الأدق والأبطأ"
     )
@@ -153,72 +162,92 @@ object CloudAiClient {
         val models = (listOf(model.ifBlank { "" }) + candidateModels).filter { it.isNotBlank() }.distinct()
         var lastError = "تعذّر الاتصال بالمساعد."
         val tried = mutableListOf<String>()
+        var sawFatal = false
 
         for (candidate in models) {
-            for (level in BodyLevel.entries) {
-                val url = if (streaming) {
-                    "$HOST/models/$candidate:streamGenerateContent?alt=sse"
-                } else {
-                    "$HOST/models/$candidate:generateContent"
-                }
+            // كل موديل يُجرّب RETRIES_PER_MODEL مرات، لأن 503/429 عادةً عابرة
+            for (retry in 0 until RETRIES_PER_MODEL) {
+                if (retry > 0) delay(700L * retry)
 
-                val request = Request.Builder()
-                    .url(url)
-                    .header("x-goog-api-key", apiKey)
-                    .header("Content-Type", "application/json")
-                    .post(buildBody(style, context, history, level).toRequestBody(JSON))
-                    .build()
+                for (level in BodyLevel.entries) {
+                    val url = if (streaming) {
+                        "$HOST/models/$candidate:streamGenerateContent?alt=sse"
+                    } else {
+                        "$HOST/models/$candidate:generateContent"
+                    }
 
-                val result = try {
-                    client.newCall(request).execute().use { response ->
-                        val payload = response.body?.string().orEmpty()
-                        when {
-                            response.code == 404 -> Trial.Skip("الموديل «$candidate» غير متاح لمفتاحك")
-                            // 400 غالبًا حقل غير مدعوم: ننزل درجة في سلّم التوافق
-                            response.code == 400 -> Trial.Downgrade(snippet(payload))
-                            response.code == 401 || response.code == 403 -> Trial.Fatal(friendlyHttpError(response.code, payload))
-                            response.code == 429 -> Trial.Fatal(friendlyHttpError(response.code, payload))
-                            !response.isSuccessful -> Trial.Fatal(friendlyHttpError(response.code, payload))
-                            else -> {
-                                val text = if (streaming) parseSse(payload, onChunk) else extractText(payload)
-                                Trial.Ok(text)
+                    val request = Request.Builder()
+                        .url(url)
+                        .header("x-goog-api-key", apiKey)
+                        .header("Content-Type", "application/json")
+                        .post(buildBody(style, context, history, level).toRequestBody(JSON))
+                        .build()
+
+                    val result = try {
+                        client.newCall(request).execute().use { response ->
+                            val payload = response.body?.string().orEmpty()
+                            when {
+                                response.code == 404 -> Trial.Skip("الموديل «$candidate» غير متاح لمفتاحك")
+                                // 400 = حقل غير مدعوم: ننزل درجة في سلّم التوافق
+                                response.code == 400 -> Trial.Downgrade(snippet(payload))
+                                // 401/403 حتمية: المفتاح أو المشروع
+                                response.code == 401 || response.code == 403 ->
+                                    Trial.Fatal(friendlyHttpError(response.code, payload))
+                                // 429 = حصة: نجرب موديلًا آخر بدل الاستسلام
+                                response.code == 429 -> Trial.Skip("تجاوزت الحصة مؤقتًا على «$candidate»")
+                                // 500/502/503/504 = عطل مؤقت عند Google: نعيد ثم ننتقل
+                                response.code == 500 || response.code == 502 ||
+                                    response.code == 503 || response.code == 504 ->
+                                    Trial.RetryOrFail("خدمة Google مشغولة (${response.code})")
+                                !response.isSuccessful -> Trial.RetryOrFail(friendlyHttpError(response.code, payload))
+                                else -> {
+                                    val text = if (streaming) parseSse(payload, onChunk) else extractText(payload)
+                                    Trial.Ok(text)
+                                }
                             }
                         }
+                    } catch (e: SocketTimeoutException) {
+                        Trial.RetryOrFail("انتهت مدة الانتظار — جرّب WiFi أو أعد المحاولة")
+                    } catch (e: UnknownHostException) {
+                        Trial.RetryOrFail("تعذّر تحليل اسم الخادم — تحقّق من الشبكة")
+                    } catch (e: IOException) {
+                        Trial.RetryOrFail("انقطاع الشبكة: ${e.message ?: "غير معروف"}")
                     }
-                } catch (e: SocketTimeoutException) {
-                    Trial.RetryOrFail("انتهت مدة الانتظار (${CALL_TIMEOUT}ث). جرّب WiFi بدل بيانات الجوال.")
-                } catch (e: UnknownHostException) {
-                    Trial.RetryOrFail("تعذّر تحليل اسم الخادم — قد تكون الشبكة تحتاج تسجيل دخول")
-                } catch (e: IOException) {
-                    Trial.RetryOrFail("انقطاع الشبكة: ${e.message ?: "غير معروف"}")
+
+                    when (result) {
+                        is Trial.Ok -> return result.text
+                        is Trial.Fatal -> {
+                            lastError = result.message
+                            sawFatal = true
+                        }
+                        is Trial.Skip -> {
+                            lastError = result.reason
+                            break
+                        }
+                        is Trial.Downgrade -> {
+                            lastError = "الطلب غير مدعوم: ${result.reason}"
+                            tried += "$candidate/$level"
+                            continue
+                        }
+                        is Trial.RetryOrFail -> {
+                            lastError = result.reason
+                            tried += "$candidate"
+                            continue
+                        }
+                    }
                 }
 
-                when (result) {
-                    is Trial.Ok -> return result.text
-                    is Trial.Fatal -> error(result.message)
-                    is Trial.Skip -> {
-                        lastError = result.reason
-                        break
-                    }
-                    is Trial.Downgrade -> {
-                        lastError = "تعذّر إرسال الطلب: ${result.reason}"
-                        tried += "$candidate/$level"
-                        continue
-                    }
-                    is Trial.RetryOrFail -> {
-                        delay(500)
-                        lastError = result.reason
-                        tried += "$candidate/$level"
-                        continue
-                    }
-                }
+                // خطأ حتمي (401/403) لا يتغير بإعادة المحاولة
+                if (sawFatal) error(lastError)
             }
         }
+
         error(buildString {
             append(lastError)
             if (tried.isNotEmpty()) {
-                append("\n\nالمحاولات: ")
-                append(tried.take(4).joinToString("، "))
+                append("\n\nجرّبت: ")
+                append(tried.distinct().take(4).joinToString("، "))
+                append("\nجرّب موديلًا آخر من الإعدادات، أو استخدم الوضع المحلي.")
             }
         })
     }

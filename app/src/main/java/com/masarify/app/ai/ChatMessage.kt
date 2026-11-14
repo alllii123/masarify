@@ -15,5 +15,7 @@ data class ChatMessage(
     val elapsedMs: Long? = null,
     val model: String? = null,
     /** وصف قصير لعملية نُفّذت فعليًا على البيانات (شارة تظهر تحت الرسالة). */
-    val action: String? = null
+    val action: String? = null,
+    /** رسالة تطلب تأكيدًا قبل التنفيذ — تختفي بعد التأكيد. */
+    val pending: Boolean = false
 )

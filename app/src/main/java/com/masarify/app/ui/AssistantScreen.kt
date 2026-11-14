@@ -196,7 +196,11 @@ fun AssistantScreen(
                 }
             } else {
                 items(messages.filter { it.text.isNotBlank() || it.error != null }, key = { it.id }) { message ->
-                    ChatBubble(message)
+                    ChatBubble(
+                        message = message,
+                        onConfirm = { viewModel.confirmPendingCommand() },
+                        onCancel = { viewModel.cancelPendingCommand() }
+                    )
                 }
                 if (state.aiThinking) {
                     item {
@@ -366,7 +370,11 @@ private fun QuickQuestions(onPick: (String) -> Unit) {
 }
 
 @Composable
-private fun ChatBubble(message: ChatMessage) {
+private fun ChatBubble(
+    message: ChatMessage,
+    onConfirm: () -> Unit = {},
+    onCancel: () -> Unit = {}
+) {
     val isUser = message.role == "user"
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -406,6 +414,35 @@ private fun ChatBubble(message: ChatMessage) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (!isUser && message.pending) {
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        onClick = onConfirm,
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary
+                    ) {
+                        Text(
+                            "تأكيد ✓",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                    Surface(
+                        onClick = onCancel,
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest
+                    ) {
+                        Text(
+                            "إلغاء",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
             if (!isUser && message.action != null) {
                 Spacer(Modifier.height(5.dp))
                 Surface(

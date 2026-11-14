@@ -71,6 +71,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val backupStatus = MutableStateFlow("")
     private val backupBusy = MutableStateFlow(false)
     private val restoreCandidate = MutableStateFlow<BackupCodec.Parsed?>(null)
+    /** أمر مفهوم لكن غير صريح — ينتظر ضغطة تأكيد من المستخدم. */
+    private val pendingCommand = MutableStateFlow<FinCommand?>(null)
 
     /** آخر لقطة مالية محفوظة، حتى تستخدم الشاشات السريعة نفس الأرقام. */
     @Volatile private var lastSnapshot: MoneySnapshot? = null
@@ -262,10 +264,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // ── 0) الأوامر التنفيذية أولًا ──────────────────────────────────
             // «أضف/عدّل/احذف» تنفّذ فعلًا على قاعدة البيانات قبل أي اتصال سحابي،
             // فتعمل حتى بدون إنترنت. ردّ السحابة لا ينفّذ شيئًا إطلاقًا.
-            val command = CommandParser.parse(text)
-            if (command != null) {
-                val outcome = executeCommand(command)
-                chat.update { it + outcome }
+            val parsed = CommandParser.parse(text)
+            if (parsed != null) {
+                if (parsed.explicit) {
+                    chat.update { it + executeCommand(parsed.command) }
+                } else {
+                    // صياغة مفهومة لكن بلا فعل صريح ⇒ تأكيد بضغطة، لا تسجيل تلقائي
+                    pendingCommand.value = parsed.command
+                    chat.update {
+                        it + ChatMessage(
+                            role = "model",
+                            text = CommandParser.proposalText(parsed.command) { v -> formatMoney(v) } +
+                                "\nاضغط «تأكيد» وأسجلها فورًا.",
+                            source = "local",
+                            pending = true
+                        )
+                    }
+                }
                 return@launch
             }
 
@@ -424,10 +439,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         note = "من المساعد",
                         source = "ASSISTANT"
                     )
-                    val after = repository.accountsOnce().firstOrNull { it.id == account.id }?.currentBalance ?: 0
+                    val accounts = repository.accountsOnce()
+                    val after = accounts.firstOrNull { it.id == account.id }?.currentBalance ?: 0
+                    val total = accounts.sumOf { it.currentBalance }
                     ChatMessage(
                         role = "model",
-                        text = CommandParser.describe(command, after, ::money),
+                        text = CommandParser.describe(command, after, total, ::money),
                         source = "local",
                         action = "أُضيفت عملية"
                     )
@@ -454,10 +471,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         source = "ASSISTANT",
                         timestamp = target.timestamp
                     )
-                    val after = repository.accountsOnce().firstOrNull { it.id == target.accountId }?.currentBalance ?: 0
+                    val accounts = repository.accountsOnce()
+                    val after = accounts.firstOrNull { it.id == target.accountId }?.currentBalance ?: 0
+                    val total = accounts.sumOf { it.currentBalance }
                     ChatMessage(
                         role = "model",
-                        text = CommandParser.describe(command, after, ::money),
+                        text = CommandParser.describe(command, after, total, ::money),
                         source = "local",
                         action = "عُدّلت العملية"
                     )
@@ -472,10 +491,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             error = "لم تُعثر على العملية"
                         )
                     repository.deleteTransaction(target)
-                    val after = repository.accountsOnce().firstOrNull { it.id == target.accountId }?.currentBalance ?: 0
+                    val accounts = repository.accountsOnce()
+                    val after = accounts.firstOrNull { it.id == target.accountId }?.currentBalance ?: 0
+                    val total = accounts.sumOf { it.currentBalance }
                     ChatMessage(
                         role = "model",
-                        text = CommandParser.describe(command, after, ::money),
+                        text = CommandParser.describe(command, after, total, ::money),
                         source = "local",
                         action = "حُذفت العملية"
                     )
@@ -507,6 +528,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             byMerchant.isNotEmpty() -> byMerchant.first()
             // لا مبلغ ولا اسم: نأخذ آخر عملية لو الطلب حذف «آخر عملية»
             else -> if (amount == null && merchant.isNullOrBlank()) list.first() else null
+        }
+    }
+
+    /** ينفّذ الأمر المعلّق بعد تأكيد المستخدم. */
+    fun confirmPendingCommand() = viewModelScope.launch {
+        val command = pendingCommand.value ?: return@launch
+        pendingCommand.value = null
+        // نحذف رسالة طلب التأكيد ونضع نتيجة التنفيذ مكانها
+        chat.update { list -> list.filterNot { it.pending } + executeCommand(command) }
+    }
+
+    fun cancelPendingCommand() {
+        pendingCommand.value = null
+        chat.update { list ->
+            list.filterNot { it.pending } + ChatMessage(
+                role = "model",
+                text = "طيّب، ما سجلت شي.",
+                source = "local"
+            )
         }
     }
 

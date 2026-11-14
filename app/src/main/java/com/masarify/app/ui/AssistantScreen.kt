@@ -279,6 +279,23 @@ private fun AssistantIntro(snapshot: MoneySnapshot) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "أقدر أنفّذ مو بس أجاوب",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    "قل «أضف مصروف ٥٠ بقالة» أو «عدّل آخر عملية إلى ٧٠» أو «احذف آخر عملية» — أنفّذها فورًا في بياناتك وأعرض لك الرصيد الجديد. التنفيذ يشتغل حتى بدون إنترنت.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
+        Surface(
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
@@ -323,10 +340,10 @@ private fun InsightCard(insight: Insight) {
 @Composable
 private fun QuickQuestions(onPick: (String) -> Unit) {
     val questions = listOf(
+        "أضف مصروف 50 قهوة",
         "كم باقي لي أقدر أصرف؟",
         "وين أصرف أكثر؟",
-        "كم أقدر أوفر هذي الدورة؟",
-        "توقع مصروفي نهاية الشهر"
+        "احذف آخر عملية"
     )
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("أسئلة سريعة", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -389,6 +406,26 @@ private fun ChatBubble(message: ChatMessage) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (!isUser && message.action != null) {
+                Spacer(Modifier.height(5.dp))
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("✓", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Spacer(Modifier.size(5.dp))
+                        Text(
+                            "${message.action} في التطبيق",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
             if (!isUser && message.error != null) {
                 Spacer(Modifier.height(4.dp))
                 Text(

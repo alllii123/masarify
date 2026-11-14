@@ -10,9 +10,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.masarify.app.ai.ChatMessage
 import com.masarify.app.ai.CloudAiClient
+import com.masarify.app.ai.CommandParser
+import com.masarify.app.ai.FinCommand
 import com.masarify.app.ai.MoneySnapshot
 import com.masarify.app.ai.NetDiag
 import com.masarify.app.update.UpdateChecker
+import com.masarify.app.util.formatMoney
 import com.masarify.app.ai.cloudContext
 import com.masarify.app.ai.localAnswer
 import com.masarify.app.data.AccountEntity
@@ -256,6 +259,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         chat.update { it + ChatMessage(role = "user", text = text, source = null) }
         thinking.value = true
         try {
+            // ── 0) الأوامر التنفيذية أولًا ──────────────────────────────────
+            // «أضف/عدّل/احذف» تنفّذ فعلًا على قاعدة البيانات قبل أي اتصال سحابي،
+            // فتعمل حتى بدون إنترنت. ردّ السحابة لا ينفّذ شيئًا إطلاقًا.
+            val command = CommandParser.parse(text)
+            if (command != null) {
+                val outcome = executeCommand(command)
+                chat.update { it + outcome }
+                return@launch
+            }
+
             val localReply = try {
                 localAnswer(text, snapshot)
             } catch (t: Throwable) {
@@ -380,6 +393,120 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         } finally {
             thinking.value = false
+        }
+    }
+
+    // ── تنفيذ أوامر المساعد ──────────────────────────────────────────────────
+    /**
+     * ينفّذ الأمر على قاعدة البيانات فعليًا، ويرجّع رسالة تصف ما حدث **بعد**
+     * قراءة الرصيد الجديد من المخزن — فما يمكن أن يقول «سجلت» وعملية ما صارت.
+     */
+    private suspend fun executeCommand(command: FinCommand): ChatMessage {
+        fun money(value: Long) = formatMoney(value, withCurrency = true)
+
+        return try {
+            when (command) {
+                is FinCommand.Add -> {
+                    val account = repository.accountsOnce().firstOrNull()
+                        ?: return ChatMessage(
+                            role = "model",
+                            text = "ما فيه حساب مسجل. أضف حسابًا من الإعدادات أولًا.",
+                            source = "local",
+                            error = "لا يوجد حساب"
+                        )
+                    repository.addTransaction(
+                        type = command.type,
+                        amount = command.amount,
+                        accountId = account.id,
+                        toAccountId = null,
+                        category = command.category,
+                        merchant = command.merchant,
+                        note = "من المساعد",
+                        source = "ASSISTANT"
+                    )
+                    val after = repository.accountsOnce().firstOrNull { it.id == account.id }?.currentBalance ?: 0
+                    ChatMessage(
+                        role = "model",
+                        text = CommandParser.describe(command, after, ::money),
+                        source = "local",
+                        action = "أُضيفت عملية"
+                    )
+                }
+
+                is FinCommand.Edit -> {
+                    val target = findMatch(command.matchAmount, command.matchMerchant)
+                        ?: return ChatMessage(
+                            role = "model",
+                            text = "ما لقيت عملية مطابقة. اذكر المبلغ بالضبط أو اسم المكان، أو عدّلها من قائمة العمليات.",
+                            source = "local",
+                            error = "لم تُعثر على العملية"
+                        )
+                    // إزالة العملية القديمة (مع عكس أثرها) ثم إضافة الجديدة بنفس بياناتها
+                    repository.deleteTransaction(target)
+                    repository.addTransaction(
+                        type = target.type,
+                        amount = command.newAmount,
+                        accountId = target.accountId,
+                        toAccountId = target.toAccountId,
+                        category = command.newCategory?.ifBlank { target.category } ?: target.category,
+                        merchant = target.merchant,
+                        note = target.note.ifBlank { "من المساعد" },
+                        source = "ASSISTANT",
+                        timestamp = target.timestamp
+                    )
+                    val after = repository.accountsOnce().firstOrNull { it.id == target.accountId }?.currentBalance ?: 0
+                    ChatMessage(
+                        role = "model",
+                        text = CommandParser.describe(command, after, ::money),
+                        source = "local",
+                        action = "عُدّلت العملية"
+                    )
+                }
+
+                is FinCommand.Delete -> {
+                    val target = findMatch(command.matchAmount, command.matchMerchant)
+                        ?: return ChatMessage(
+                            role = "model",
+                            text = "ما لقيت العملية اللي تبي أحذفها. اذكر المبلغ أو اسم المكان.",
+                            source = "local",
+                            error = "لم تُعثر على العملية"
+                        )
+                    repository.deleteTransaction(target)
+                    val after = repository.accountsOnce().firstOrNull { it.id == target.accountId }?.currentBalance ?: 0
+                    ChatMessage(
+                        role = "model",
+                        text = CommandParser.describe(command, after, ::money),
+                        source = "local",
+                        action = "حُذفت العملية"
+                    )
+                }
+            }
+        } catch (t: Throwable) {
+            ChatMessage(
+                role = "model",
+                text = "ما قدرت أنفّذ العملية: ${t.message ?: t.javaClass.simpleName}",
+                source = "local",
+                error = "فشل التنفيذ"
+            )
+        }
+    }
+
+    /** يبحث عن أحدث عملية تطابق المبلغ و/أو اسم المكان. */
+    private fun findMatch(amount: Long?, merchant: String?): TransactionEntity? {
+        val list = uiState.value.transactions
+        if (list.isEmpty()) return null
+        val byAmount = amount?.let { want -> list.filter { it.amount == want } }.orEmpty()
+        val byMerchant = merchant?.takeIf { it.isNotBlank() }?.let { name ->
+            list.filter { it.merchant.contains(name, ignoreCase = true) || it.note.contains(name, ignoreCase = true) }
+        }.orEmpty()
+
+        return when {
+            byAmount.isNotEmpty() && byMerchant.isNotEmpty() ->
+                byMerchant.firstOrNull { it.amount == amount } ?: byAmount.first()
+            byAmount.isNotEmpty() -> byAmount.first()
+            byMerchant.isNotEmpty() -> byMerchant.first()
+            // لا مبلغ ولا اسم: نأخذ آخر عملية لو الطلب حذف «آخر عملية»
+            else -> if (amount == null && merchant.isNullOrBlank()) list.first() else null
         }
     }
 

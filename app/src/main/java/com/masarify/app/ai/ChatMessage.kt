@@ -13,5 +13,7 @@ data class ChatMessage(
     val error: String? = null,
     /** زمن رد السحابة بالمللي — يظهر للمستخدم ليعرف السرعة الفعلية. */
     val elapsedMs: Long? = null,
-    val model: String? = null
+    val model: String? = null,
+    /** وصف قصير لعملية نُفّذت فعليًا على البيانات (شارة تظهر تحت الرسالة). */
+    val action: String? = null
 )

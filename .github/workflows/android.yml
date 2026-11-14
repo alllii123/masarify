@@ -29,11 +29,13 @@ jobs:
       - name: Test and assemble
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --max-workers=2 testDebugUnitTest assembleDebug
+          ./gradlew --no-daemon --max-workers=2 testDebugUnitTest assembleDebug assembleRelease
 
-      - name: Upload test APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: masarify-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: masarify-apks
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
           retention-days: 14

@@ -2,13 +2,20 @@
 
 نسخة أصلية بـ **SwiftUI** داخل نفس المستودع، بنفس الإصدار **0.4.8** وبنفس المنطق المالي.
 
-> **مهم:** بناء IPA وتثبيته على iPhone يحتاج جهاز Mac + حساب Apple.
-> هذا المستودع يحتوي **الكود الكامل والمشروع الجاهز**، لكن وقت التشغيل النهائي
-> يحصل من Xcode على جهازك — لا يمكن توليد IPA موقّع من بيئة لينكس.
+> **مهم:** iOS لا يسمح بتثبيت تطبيق من ملف جاهز مثل أندرويد. الملف يجب أن يُوقَّع
+> بهوية Apple خاصة بك. لذلك البناء يحدث في السحابة (GitHub Actions على macOS)،
+> والتوقيع يحدث على جهازك (ويندوز بـ Sideloadly). لا تحتاج Mac.
 
 ---
 
-## التشغيل
+## 📱 التثبيت بدون Mac (ويندوز + آيفون)
+
+اتبع **[HOW-TO-INSTALL-WINDOWS.md](HOW-TO-INSTALL-WINDOWS.md)** — دليل كامل خطوة بخطوة.
+
+الخلاصة: ابنِ الـ IPA من تبويب Actions على GitHub ← وقّعه بـ Sideloadly بحساب Apple ID المجاني.
+ما تحتاج Mac ولا حساب مدفوع.
+
+## التشغيل على Mac
 
 ```bash
 git clone https://github.com/alllii123/masarify.git
@@ -18,6 +25,17 @@ open Mahfazati.xcodeproj
 
 1. اختر Team في **Signing & Capabilities** (حسابك المجاني يكفي).
 2. اختر الجهاز (iPhone أو iPad) واضغط **Run**.
+
+## توليد المشروع من الصفر
+
+لو تبي إعادة توليد `Mahfazati.xcodeproj` (مثلاً بعد إضافة ملفات):
+
+```bash
+brew install xcodegen
+cd ios && xcodegen generate
+```
+
+`project.yml` هو المصدر، والمشروع المولّد يُلتزم في المستودع للسهولة.
 
 - **الحد الأدنى:** iOS 17.0
 - **الأجهزة:** iPhone و iPad (`TARGETED_DEVICE_FAMILY = 1,2`)

@@ -64,19 +64,21 @@ struct ReportsView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 24)
             } else {
-                Chart(snapshot.spendByCategory.prefix(6), id: \.category) { item in
-                    SectorMark(
+                Chart {
+                    ForEach(Array(snapshot.spendByCategory.prefix(6).enumerated()), id: \.offset) { _, item in
+                        SectorMark(
                         angle: .value("المبلغ", Double(item.amount)),
                         innerRadius: .ratio(0.55),
-                        angularInset: 2
-                    )
-                    .cornerRadius(5)
-                    .foregroundStyle(by: .value("التصنيف", item.category))
-                    .annotation(position: .overlay) {
-                        if Double(item.amount) / Double(max(1, snapshot.cycleExpense)) > 0.12 {
-                            Text("\(Int(Double(item.amount) / Double(max(1, snapshot.cycleExpense)) * 100))%")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white)
+                            angularInset: 2
+                        )
+                        .cornerRadius(5)
+                        .foregroundStyle(by: .value("التصنيف", item.category))
+                        .annotation(position: .overlay) {
+                            if Double(item.amount) / Double(max(1, snapshot.cycleExpense)) > 0.12 {
+                                Text("\(Int(Double(item.amount) / Double(max(1, snapshot.cycleExpense)) * 100))%")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
                         }
                     }
                 }
@@ -108,13 +110,15 @@ struct ReportsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity).padding(.vertical, 18)
             } else {
-                Chart(dailyTotals, id: \.day) { item in
-                    BarMark(
-                        x: .value("اليوم", item.day, unit: .day),
-                        y: .value("المبلغ", Double(item.amount) / 100)
-                    )
-                    .foregroundStyle(store.theme.primaryLight.gradient)
-                    .cornerRadius(4)
+                Chart {
+                    ForEach(dailyTotals, id: \.day) { item in
+                        BarMark(
+                            x: .value("اليوم", item.day, unit: .day),
+                            y: .value("المبلغ", Double(item.amount) / 100)
+                        )
+                        .foregroundStyle(store.theme.primaryLight.gradient)
+                        .cornerRadius(4)
+                    }
                 }
                 .chartYAxis {
                     AxisMarks(position: .leading)

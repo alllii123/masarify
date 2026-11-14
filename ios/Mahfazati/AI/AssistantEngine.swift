@@ -41,14 +41,13 @@ final class AssistantEngine {
     func execute(_ command: FinCommand) -> ChatMessage {
         switch command {
         case let .add(type, amount, category, merchant):
-            guard let tx = store.addTransaction(type: type, amount: amount, category: category,
+            guard store.addTransaction(type: type, amount: amount, category: category,
                                                 merchant: merchant, note: "من المساعد",
                                                 source: "ASSISTANT") else {
                 return ChatMessage(role: "model", text: "ما فيه حساب مسجل. أضف حسابًا أولًا.",
                                    source: "local", error: "لا يوجد حساب")
             }
             let total = store.snapshot.totalBalance
-            _ = tx
             return ChatMessage(
                 role: "model",
                 text: "تم ✅ سجلت \(type.arabicLabel) \(Currency.format(amount)) — \(category)\(merchant.isEmpty ? "" : "، \(merchant)").\nمجموعك الحين: \(Currency.format(total))",

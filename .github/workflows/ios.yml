@@ -1,0 +1,103 @@
+name: iOS Build
+
+# يبني نسخة iOS على جهاز macOS مستضاف، ويولّد ملف IPA غير موقّع (unsigned).
+#
+# لماذا غير موقّع: توقيع iOS يحتاج شهادة Apple خاصة بحسابك، ولا يجوز
+# ولا يجدي أن تُرفع الشهادة إلى المستودع. الملف الناتج يُوقَّع على ويندوز
+# بالأدوات المجانية (Sideloadly / AltStore) بحساب Apple ID العادي.
+#
+# التشغيل: يدويًا من تبويب Actions، أو عند تعديل أي ملف داخل ios/.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Validate project file
+        run: |
+          cd ios
+          # لو ملف المشروع موجود نستخدمه، وإلا نولّده من project.yml
+          if [ -f Mahfazati.xcodeproj/project.pbxproj ]; then
+            echo "Using committed Xcode project"
+          else
+            echo "Generating project from project.yml"
+            xcodegen generate
+          fi
+
+      - name: Resolve simulator-free archive
+        run: |
+          cd ios
+          set -o pipefail
+          xcodebuild \
+            -project Mahfazati.xcodeproj \
+            -scheme Mahfazati \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Mahfazati.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            clean archive 2>&1 | tee "$RUNNER_TEMP/archive.log" || {
+              echo "::error::فشل البناء — راجع السجل أدناه"
+              tail -80 "$RUNNER_TEMP/archive.log"
+              exit 1
+            }
+
+      - name: Package unsigned IPA
+        run: |
+          cd "$RUNNER_TEMP"
+          APP_PATH="Mahfazati.xcarchive/Products/Applications/Mahfazati.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::لم يُعثر على Mahfazati.app داخل الأرشيف"
+            ls -R Mahfazati.xcarchive/Products | head -40
+            exit 1
+          fi
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          /usr/bin/zip -qry "Mahfazati-v0.4.8-unsigned.ipa" Payload
+          ls -lh Mahfazati-v0.4.8-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mahfazati-iOS-IPA
+          path: ${{ runner.temp }}/Mahfazati-v0.4.8-unsigned.ipa
+          retention-days: 90
+
+      - name: Summary
+        run: |
+          {
+            echo "## ✅ تم بناء نسخة iOS"
+            echo ""
+            echo "**الخطوة التالية:** نزّل الملف من تبويب Artifacts بالأعلى،"
+            echo "ثم وقّعه على ويندوز بـ Sideloadly باستخدام Apple ID الخاص بك."
+            echo ""
+            echo "| العنصر | القيمة |"
+            echo "|---|---|"
+            echo "| الإصدار | 0.4.8 |"
+            echo "| Bundle ID | com.mahfazati.app |"
+            echo "| الأجهزة | iPhone + iPad |"
+            echo "| التوقيع | غير موقّع (يُوقَّع على جهازك) |"
+          } >> "$GITHUB_STEP_SUMMARY"
